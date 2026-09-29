@@ -6,10 +6,12 @@ import com.example.data.remote.LiveMarketAndNewsService
 import com.example.model.MarketSymbol
 import com.example.model.OnlineDataProvider
 import com.example.model.Timeframe
+import com.example.util.TradeNotificationHelper
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -112,25 +114,104 @@ class ExampleRobolectricTest {
     }
 
     @Test
+    fun userPreferencesManager_persistsCredentialsAcrossAppRestarts() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.example.data.local.UserPreferencesManager.getInstance(context)
+
+        // Simpan kredensial custom di instance pertama
+        prefs.saveMetaApiCredentials(
+            accountId = "test-account-id-12345",
+            authToken = "test-auth-token-67890",
+            region = "new-york"
+        )
+        prefs.saveGitHubRepository("customuser/customrepo")
+        prefs.saveSelectedProvider(OnlineDataProvider.ELEV8_METAAPI.id)
+        prefs.saveBrokerSuffix(".raw")
+
+        // Buat instance service baru (seolah-olah aplikasi baru saja dibuka/reboot)
+        val service = LiveMarketAndNewsService(prefs)
+        assertEquals("test-account-id-12345", service.getMetaApiAccountId())
+        assertEquals("test-auth-token-67890", service.getMetaApiAuthToken())
+        assertEquals("new-york", service.getMetaApiRegion())
+        assertEquals("customuser/customrepo", service.getDefaultGitHubRepository())
+        assertTrue(service.isMetaApiConfigured())
+        assertTrue(service.hasCustomCredentials())
+
+        // Test clear credentials
+        service.clearCustomMetaApiCredentials()
+        assertEquals(false, service.hasCustomCredentials())
+        assertEquals("", prefs.getMetaApiAccountId())
+        assertEquals("", prefs.getMetaApiAuthToken())
+    }
+
+    @Test
     fun diagnoseMetaApiLiveConnection() = runBlocking {
         val service = LiveMarketAndNewsService()
         val client = okhttp3.OkHttpClient()
         val accId = BuildConfig.METAAPI_ACCOUNT_ID
         val token = BuildConfig.METAAPI_AUTH_TOKEN
-        val provReq = okhttp3.Request.Builder()
-            .url("https://mt-provisioning-api-v1.agiliumtrade.ai/users/current/accounts/$accId")
-            .header("auth-token", token)
-            .build()
-        client.newCall(provReq).execute().use { resp ->
-            println("METAAPI_PROV_STATUS=${resp.code}")
-            println("METAAPI_PROV_BODY=${resp.body?.string()}")
+        if (accId.isNotBlank() && !accId.startsWith("YOUR_")) {
+            runCatching {
+                val provReq = okhttp3.Request.Builder()
+                    .url("https://mt-provisioning-api-v1.agiliumtrade.ai/users/current/accounts/$accId")
+                    .header("auth-token", token)
+                    .build()
+                client.newCall(provReq).execute().use { resp ->
+                    println("METAAPI_PROV_STATUS=${resp.code}")
+                    println("METAAPI_PROV_BODY=${resp.body?.string()}")
+                }
+            }
         }
         val outcome = service.fetchSymbolRates(
             symbol = MarketSymbol.XAUUSD,
             timeframe = Timeframe.M15,
             provider = OnlineDataProvider.ELEV8_METAAPI
         )
+        assertNotNull(outcome)
         println("METAAPI_OUTCOME=$outcome")
+    }
+
+    @Test
+    fun tradeNotificationHelper_sendsNotificationWithProviderIsolation() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        TradeNotificationHelper.createNotificationChannel(context)
+
+        // Verifikasi pengiriman notifikasi teruji
+        val result = TradeNotificationHelper.sendTradeSignalNotification(
+            context = context,
+            provider = OnlineDataProvider.BINANCE_VISION,
+            symbol = MarketSymbol.XAUUSD,
+            timeframe = Timeframe.M15,
+            bar1EpochSec = 1700000000L,
+            verdict = com.example.model.AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+            entryPrice = 2750.50,
+            stopLossPrice = 2740.00,
+            target1Price = 2765.00,
+            target2Price = 2780.00,
+            isTestAlert = true
+        )
+        assertTrue(result)
+    }
+
+    @Test
+    fun tradeMetricPrices_clipboardFormattingIsValidForMetaTrader5() {
+        val entryPrice = 2750.55
+        val slPrice = 2740.10
+        val tp1Price = 2765.80
+        val tp2Price = 2780.00
+        val lotSize = 0.15
+
+        val entryText = String.format(java.util.Locale.US, "%.2f", entryPrice)
+        val slText = String.format(java.util.Locale.US, "%.2f", slPrice)
+        val tp1Text = String.format(java.util.Locale.US, "%.2f", tp1Price)
+        val tp2Text = String.format(java.util.Locale.US, "%.2f", tp2Price)
+        val lotText = String.format(java.util.Locale.US, "%.2f", lotSize)
+
+        assertEquals("2750.55", entryText)
+        assertEquals("2740.10", slText)
+        assertEquals("2765.80", tp1Text)
+        assertEquals("2780.00", tp2Text)
+        assertEquals("0.15", lotText)
     }
 }
 

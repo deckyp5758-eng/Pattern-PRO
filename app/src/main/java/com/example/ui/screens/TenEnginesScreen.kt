@@ -11,12 +11,21 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,6 +37,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.domain.SystemDiagnosticReport
+import com.example.model.AnalyticalVerdict
 import com.example.model.CandlestickPatternType
 import com.example.model.CompleteHubAnalysis
 import com.example.model.PatternBias
@@ -59,6 +69,8 @@ fun TenEnginesScreen(
     val vEngine = analysis.volatilityEngine
     val srEngine = analysis.srEngine
     val volEngine = analysis.volumeEngine
+    val mtfEngine = analysis.mtfEngine
+    val newsEngine = analysis.newsEngine
 
     LazyColumn(
         modifier = modifier
@@ -69,11 +81,64 @@ fun TenEnginesScreen(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
+        // HEADER RINGKASAN AUDIT MESIN
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, GoldPrimary.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .testTag("engines_audit_header_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "AUDIT 10 MESIN KUANTITATIF",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = GoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Surface(
+                            color = BullishEmerald.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(1.dp, BullishEmerald.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        ) {
+                            Text(
+                                text = "100% NON-REPAINT",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = BullishEmerald,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Instrumen: ${analysis.symbol.code} (${analysis.symbol.displayName}) • Timeframe: ${analysis.activeTimeframe.label} (${analysis.activeTimeframe.mt5EnumName})",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = "Semua perhitungan sinyal dikunci mutlak pada Candle Tutup Indeks [1]. Candle [0] hanya sebagai pemantau harga berjalan tanpa mengubah status sinyal historis.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanSecondary
+                    )
+                }
+            }
+        }
+
         // 0. PANEL DIAGNOSTIK & PENGAMAN ANTI-TUMPANG-TINDIH / ANTI-DOBEL REQUEST
         item {
             EngineSectionCard(
                 engineNumber = "DIAG",
-                title = "PENGAMAN ANTI-TUMPANG-TINDIH & DIAGNOSTIK DATA",
+                title = "PENGAMAN DATA & DIAGNOSTIK SISTEM",
                 badgeText = if (diagnostics.isDataConsistent) "BEBAS TUMPANG TINDIH" else "PERIKSA DATA",
                 badgeColor = if (diagnostics.isDataConsistent) BullishEmerald else BearishCrimson
             ) {
@@ -85,17 +150,18 @@ fun TenEnginesScreen(
                 EngineRow("Respons Usang Dibuang", "${diagnostics.discardedStaleResponses} paket usang diabaikan (Anti-Tumpang-Tindih)")
                 EngineRow("Pembersihan Cache & Sinkron", "${diagnostics.cachePurgeCount}x dibersihkan • Durasi: ${diagnostics.lastSyncDurationMs} ms")
 
-                androidx.compose.material3.OutlinedButton(
-                    onClick = onCleanAndResetSession,
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(top = 4.dp)
-                        .testTag("diag_clean_reset_button")
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(BullishEmerald.copy(alpha = 0.12f))
+                        .border(1.dp, BullishEmerald.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
                     Text(
-                        text = "Bersihkan Seluruh Cache & Sinkron Ulang Murni",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = GoldBright
+                        text = "✓ Self-Healing & Pembersihan Cache Otomatis Aktif: Sesi & memori dibersihkan otomatis saat ganti pair/provider tanpa risiko tumpang tindih.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BullishEmerald
                     )
                 }
 
@@ -111,7 +177,7 @@ fun TenEnginesScreen(
                 if (diagnostics.recentEventsLog.isNotEmpty()) {
                     HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
                     Text(
-                        text = "Log Aktivitas & Pelacak Kesalahan Terbaru:",
+                        text = "Log Aktivitas & Pelacak Kesalahan Real-time:",
                         style = MaterialTheme.typography.labelSmall,
                         color = CyanSecondary
                     )
@@ -331,6 +397,14 @@ fun TenEnginesScreen(
                     "Acuan Skenario Turun (Sell)",
                     "Stop: ${formatPrice(vEngine.shortStopReferencePrice, digits)} | Target 1: ${formatPrice(vEngine.shortTarget1RPrice, digits)} | Target 2: ${formatPrice(vEngine.shortTarget2RPrice, digits)}"
                 )
+                if (vEngine.warningMessage != null) {
+                    HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        text = vEngine.warningMessage,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeutralAmber
+                    )
+                }
             }
         }
 
@@ -365,6 +439,201 @@ fun TenEnginesScreen(
                 EngineRow("Rata-rata Volume SMA (20)", "${volEngine.smaVolume20.toInt()}")
                 EngineRow("Rasio Volume / SMA20", "${String.format(Locale.US, "%.2f", volEngine.volumeToSmaRatio)}x (${volEngine.classification.label})")
                 EngineRow("Catatan Konfluensi", volEngine.confluenceNote)
+            }
+        }
+
+        // 10. CONFLUENCE & SCORING MATRIX ENGINE (MESIN 10)
+        item {
+            val verdictColor = when (analysis.verdict) {
+                AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BULLISH_BIAS -> BullishEmerald
+                AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BEARISH_BIAS -> BearishCrimson
+                AnalyticalVerdict.HTF_BULLISH_LTF_PULLBACK,
+                AnalyticalVerdict.HTF_BEARISH_LTF_PULLBACK,
+                AnalyticalVerdict.NEUTRAL_CONSOLIDATION -> NeutralAmber
+            }
+
+            EngineSectionCard(
+                engineNumber = "10",
+                title = "MESIN SKOR KONFLUENSI & VERDIK FINAL",
+                badgeText = analysis.verdict.label,
+                badgeColor = verdictColor
+            ) {
+                // Bar Skor Naik
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Skor Konfluensi Naik (Bullish)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = BullishEmerald
+                        )
+                        Text(
+                            text = "${analysis.bullishConfluenceScore}% / 100%",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = BullishEmerald,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { (analysis.bullishConfluenceScore / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = BullishEmerald,
+                        trackColor = SlateCardBorder
+                    )
+                }
+
+                // Bar Skor Turun
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Skor Konfluensi Turun (Bearish)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = BearishCrimson
+                        )
+                        Text(
+                            text = "${analysis.bearishConfluenceScore}% / 100%",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = BearishCrimson,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    LinearProgressIndicator(
+                        progress = { (analysis.bearishConfluenceScore / 100f).coerceIn(0f, 1f) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        color = BearishCrimson,
+                        trackColor = SlateCardBorder
+                    )
+                }
+
+                HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+
+                Text(
+                    text = "CHECKLIST 7 KRITERIA KONFLUENSI TERKUNCI [CANDLE 1]:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = GoldBright
+                )
+
+                analysis.confluenceChecklist.forEach { (criterion, passed) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(if (passed) BullishEmerald.copy(alpha = 0.2f) else TextSecondary.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (passed) Icons.Default.CheckCircle else Icons.Default.Close,
+                                contentDescription = if (passed) "Terpenuhi" else "Belum",
+                                tint = if (passed) BullishEmerald else TextSecondary.copy(alpha = 0.6f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                        Text(
+                            text = criterion,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (passed) TextPrimary else TextSecondary
+                        )
+                    }
+                }
+            }
+        }
+
+        // 11. MULTI-TIMEFRAME ENGINE
+        item {
+            EngineSectionCard(
+                engineNumber = "11",
+                title = "MESIN MULTI-TIMEFRAME (H1 • M30 • M15 • M5 • M1)",
+                badgeText = mtfEngine.htfBias.label,
+                badgeColor = when (mtfEngine.htfBias) {
+                    PatternBias.BULLISH -> BullishEmerald
+                    PatternBias.BEARISH -> BearishCrimson
+                    PatternBias.NEUTRAL -> NeutralAmber
+                }
+            ) {
+                EngineRow("Bias Timeframe Besar (H1/M30/M15)", mtfEngine.htfBias.label)
+                EngineRow("Kondisi Timeframe Kecil (M5/M1)", mtfEngine.ltfState)
+                EngineRow(
+                    "Status Koreksi (Pullback)",
+                    if (mtfEngine.isPullbackInHtfTrend) "PULLBACK AKTIF (Waspada Reversal Prematur)" else "SEARAH TREN UTAMA"
+                )
+                EngineRow("Kesimpulan Eksekutif", mtfEngine.executiveConclusion)
+
+                HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    text = "STATUS TIAP TIMEFRAME:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = CyanSecondary
+                )
+                mtfEngine.rows.forEach { row ->
+                    val rowColor = when (row.bias) {
+                        PatternBias.BULLISH -> BullishEmerald
+                        PatternBias.BEARISH -> BearishCrimson
+                        PatternBias.NEUTRAL -> NeutralAmber
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${row.timeframe.label}: ${row.trend.label} • ${row.structure.label}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = row.bias.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = rowColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+
+        // 12. NEWS & FUNDAMENTAL ENGINE
+        item {
+            EngineSectionCard(
+                engineNumber = "12",
+                title = "MESIN MAKRO FUNDAMENTAL & BERITA EKONOMI",
+                badgeText = newsEngine.dominantSentiment.label,
+                badgeColor = CyanSecondary
+            ) {
+                EngineRow("Sentimen Dominan", newsEngine.dominantSentiment.label)
+                EngineRow("Berita Dampak Tinggi Aktif", "${newsEngine.highImpactCount} Agenda Terkait ${analysis.symbol.code}")
+                EngineRow("Status Sinkronisasi RSS", if (newsEngine.isLiveRssSynced) "LIVE ONLINE RSS TERVERIFIKASI" else "OFFLINE / CADANGAN")
+                if (newsEngine.newsRiskWarning != null) {
+                    HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        text = newsEngine.newsRiskWarning,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = NeutralAmber
+                    )
+                }
             }
         }
 

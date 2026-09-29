@@ -1,10 +1,16 @@
 package com.example
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -25,6 +31,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Analytics
 import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.CloudOff
@@ -46,6 +53,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -67,6 +75,8 @@ import com.example.ui.screens.Mql5StudioScreen
 import com.example.ui.screens.MtfMatrixScreen
 import com.example.ui.screens.NewsEngineScreen
 import com.example.ui.screens.TenEnginesScreen
+import com.example.ui.screens.TradeSignalScreen
+import com.example.util.TradeNotificationHelper
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
 import com.example.ui.theme.BullishBg
@@ -98,11 +108,69 @@ fun HubSmartPatternApp() {
     val context = LocalContext.current
     val repository = remember {
         val db = HubDatabase.getInstance(context)
-        HubRepository(db.hubDao())
+        val prefs = com.example.data.local.UserPreferencesManager.getInstance(context)
+        HubRepository(db.hubDao(), prefs)
     }
     val viewModel: HubViewModel = viewModel(factory = HubViewModel.Factory(repository))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val savedLogs by viewModel.savedSignalLogs.collectAsStateWithLifecycle()
+
+    // Permintaan Izin Notifikasi Otomatis saat Aplikasi Dibuka / Di-install
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* Disetujui / Ditolak ditangani langsung oleh sistem Android */ }
+
+    LaunchedEffect(Unit) {
+        TradeNotificationHelper.createNotificationChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val isGranted = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!isGranted) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    // Alarm Notifikasi Sinyal Trade Otomatis di Layar Notifikasi HP
+    LaunchedEffect(
+        uiState.analysis?.dataEngine?.closedCandle1?.timeEpochSec,
+        uiState.analysis?.verdict,
+        uiState.isTradeNotificationEnabled
+    ) {
+        val analysis = uiState.analysis ?: return@LaunchedEffect
+        if (uiState.isTradeNotificationEnabled) {
+            val bar1 = analysis.dataEngine.closedCandle1
+            val vEngine = analysis.volatilityEngine
+            val isBuy = analysis.verdict in listOf(
+                com.example.model.AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                com.example.model.AnalyticalVerdict.MODERATE_BULLISH_BIAS
+            )
+            val isSell = analysis.verdict in listOf(
+                com.example.model.AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                com.example.model.AnalyticalVerdict.MODERATE_BEARISH_BIAS
+            )
+            if (isBuy || isSell) {
+                val sl = if (isBuy) vEngine.longStopReferencePrice else vEngine.shortStopReferencePrice
+                val tp1 = if (isBuy) vEngine.longTarget1RPrice else vEngine.shortTarget1RPrice
+                val tp2 = if (isBuy) vEngine.longTarget2RPrice else vEngine.shortTarget2RPrice
+                TradeNotificationHelper.sendTradeSignalNotification(
+                    context = context,
+                    provider = uiState.selectedProvider,
+                    symbol = analysis.symbol,
+                    timeframe = analysis.activeTimeframe,
+                    bar1EpochSec = bar1.timeEpochSec,
+                    verdict = analysis.verdict,
+                    entryPrice = bar1.close,
+                    stopLossPrice = sl,
+                    target1Price = tp1,
+                    target2Price = tp2,
+                    isTestAlert = false
+                )
+            }
+        }
+    }
 
     if (uiState.selectedTab != HubTab.HUD_CHART) {
         BackHandler {
@@ -123,6 +191,7 @@ fun HubSmartPatternApp() {
                     val isSelected = uiState.selectedTab == tab
                     val icon = when (tab) {
                         HubTab.HUD_CHART -> Icons.Default.CandlestickChart
+                        HubTab.TRADE -> Icons.AutoMirrored.Filled.TrendingUp
                         HubTab.ENGINES -> Icons.Default.Analytics
                         HubTab.MTF_MATRIX -> Icons.Default.Layers
                         HubTab.NEWS_ENGINE -> Icons.Default.Newspaper
@@ -226,9 +295,11 @@ fun HubSmartPatternApp() {
                             ?: "Provider tidak dapat dijangkau atau mengembalikan respons kosong.",
                         metaApiAccountId = uiState.metaApiAccountIdInput,
                         metaApiAuthToken = uiState.metaApiAuthTokenInput,
+                        hasCustomSavedCredentials = uiState.hasCustomSavedCredentials,
                         onUpdateAccountId = viewModel::updateMetaApiAccountIdInput,
                         onUpdateAuthToken = viewModel::updateMetaApiAuthTokenInput,
                         onSaveMetaApi = viewModel::saveAndConnectMetaApiCredentials,
+                        onClearMetaApi = viewModel::clearSavedMetaApiCredentials,
                         onRetry = { viewModel.refreshMarketData(forceRefreshNews = true) },
                         onSwitchProvider = viewModel::selectProvider
                     )
@@ -256,13 +327,21 @@ fun HubSmartPatternApp() {
                             onDeleteSnapshot = viewModel::deleteSignalLog,
                             onClearAllSnapshots = viewModel::clearAllSignalLogs,
                             onUpdateGitHubRepo = viewModel::updateGitHubRepoInput,
-                            onCheckGitHubUpdate = viewModel::checkGitHubReleaseUpdate
+                            onCheckGitHubUpdate = viewModel::checkGitHubReleaseUpdate,
+                            onUpdateMetaApiAccountId = viewModel::updateMetaApiAccountIdInput,
+                            onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
+                            onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
+                            onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials
+                        )
+
+                        HubTab.TRADE -> TradeSignalScreen(
+                            analysis = analysis,
+                            selectedProvider = uiState.selectedProvider
                         )
 
                         HubTab.ENGINES -> TenEnginesScreen(
                             analysis = analysis,
-                            diagnostics = uiState.diagnostics,
-                            onCleanAndResetSession = viewModel::cleanAndResetDataSession
+                            diagnostics = uiState.diagnostics
                         )
 
                         HubTab.MTF_MATRIX -> MtfMatrixScreen(
@@ -274,9 +353,7 @@ fun HubSmartPatternApp() {
                         )
 
                         HubTab.NEWS_ENGINE -> NewsEngineScreen(
-                            analysis = analysis,
-                            onRefreshNews = { viewModel.refreshMarketData(forceRefreshNews = true) },
-                            onAddCustomEvent = viewModel::addCustomNewsEvent
+                            analysis = analysis
                         )
 
                         HubTab.MQL5_STUDIO -> Mql5StudioScreen(
@@ -298,9 +375,11 @@ private fun HonestOfflineErrorState(
     errorMessage: String,
     metaApiAccountId: String,
     metaApiAuthToken: String,
+    hasCustomSavedCredentials: Boolean,
     onUpdateAccountId: (String) -> Unit,
     onUpdateAuthToken: (String) -> Unit,
     onSaveMetaApi: () -> Unit,
+    onClearMetaApi: () -> Unit,
     onRetry: () -> Unit,
     onSwitchProvider: (OnlineDataProvider) -> Unit
 ) {
@@ -361,7 +440,7 @@ private fun HonestOfflineErrorState(
                     }
                 }
 
-                // Kotak Input Kredensial Langsung jika Provider adalah Elev8 MT5
+                // Kotak Input Kredensial Langsung jika Provider adalah Elev8 MT5 (Disimpan Permanen di SharedPreferences)
                 if (provider == OnlineDataProvider.ELEV8_METAAPI) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = ObsidianBg),
@@ -374,16 +453,35 @@ private fun HonestOfflineErrorState(
                             modifier = Modifier.padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "KREDENSIAL AKUN ELEV8 MT5 (SIMPAN PERMANEN)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = GoldBright,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (hasCustomSavedCredentials) {
+                                    Text(
+                                        text = "TERSIMPAN DI HP",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = BullishEmerald,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                             Text(
-                                text = "KREDENSIAL AKUN ELEV8 MT5 (METAAPI)",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = GoldBright,
-                                fontWeight = FontWeight.Bold
+                                text = "Kredensial Anda otomatis tersimpan di penyimpanan lokal HP sehingga tidak akan hilang saat aplikasi ditutup.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
                             )
                             OutlinedTextField(
                                 value = metaApiAccountId,
                                 onValueChange = onUpdateAccountId,
-                                label = { Text("Account ID MetaApi", style = MaterialTheme.typography.labelSmall) },
+                                label = { Text("Account ID MetaApi (Elev8)", style = MaterialTheme.typography.labelSmall) },
                                 placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
                                 singleLine = true,
                                 modifier = Modifier
@@ -394,24 +492,42 @@ private fun HonestOfflineErrorState(
                                 value = metaApiAuthToken,
                                 onValueChange = onUpdateAuthToken,
                                 label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
-                                placeholder = { Text("eyJhbGciOiJSUzUxMiIs...", style = MaterialTheme.typography.labelSmall) },
+                                placeholder = { Text("Token dari app.metaapi.cloud/token", style = MaterialTheme.typography.labelSmall) },
                                 singleLine = true,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .testTag("offline_auth_token_input")
                             )
-                            Button(
-                                onClick = onSaveMetaApi,
-                                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("save_connect_metaapi_button")
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "SIMPAN & SAMBUNGKAN KE ELEV8 MT5",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Button(
+                                    onClick = onSaveMetaApi,
+                                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("save_connect_metaapi_button")
+                                ) {
+                                    Text(
+                                        text = "SIMPAN & SAMBUNGKAN",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                if (hasCustomSavedCredentials || metaApiAccountId.isNotBlank()) {
+                                    OutlinedButton(
+                                        onClick = onClearMetaApi,
+                                        modifier = Modifier.testTag("offline_clear_metaapi_button")
+                                    ) {
+                                        Text(
+                                            text = "Hapus",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = BearishCrimson
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

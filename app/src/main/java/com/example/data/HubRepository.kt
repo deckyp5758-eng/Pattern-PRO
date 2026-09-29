@@ -3,6 +3,7 @@ package com.example.data
 import com.example.data.local.CustomNewsEventEntity
 import com.example.data.local.HubDao
 import com.example.data.local.SavedSignalSnapshotEntity
+import com.example.data.local.UserPreferencesManager
 import com.example.data.remote.LiveMarketAndNewsService
 import com.example.domain.SystemDiagnosticGuard
 import com.example.model.MacroNewsArticle
@@ -20,7 +21,8 @@ import kotlinx.coroutines.sync.withLock
 
 class HubRepository(
     private val hubDao: HubDao,
-    private val remoteService: LiveMarketAndNewsService = LiveMarketAndNewsService()
+    private val preferencesManager: UserPreferencesManager? = null,
+    private val remoteService: LiveMarketAndNewsService = LiveMarketAndNewsService(preferencesManager)
 ) {
     val savedSignalLogs: Flow<List<SavedSignalSnapshotEntity>> = hubDao.observeSignalLogs()
     val customNewsEvents: Flow<List<CustomNewsEventEntity>> = hubDao.observeCustomNewsEvents()
@@ -37,6 +39,8 @@ class HubRepository(
 
     fun isMetaApiConfigured(): Boolean = remoteService.isMetaApiConfigured()
 
+    fun hasCustomMetaApiCredentials(): Boolean = remoteService.hasCustomCredentials()
+
     fun getMetaApiAccountId(): String = remoteService.getMetaApiAccountId()
 
     fun getMetaApiAuthToken(): String = remoteService.getMetaApiAuthToken()
@@ -45,7 +49,40 @@ class HubRepository(
         remoteService.setCustomMetaApiCredentials(accountId, token, region)
     }
 
+    fun clearCustomMetaApiCredentials() {
+        remoteService.clearCustomMetaApiCredentials()
+    }
+
     fun getDefaultGitHubRepository(): String = remoteService.getDefaultGitHubRepository()
+
+    fun saveCustomGitHubRepository(repo: String) {
+        remoteService.saveCustomGitHubRepository(repo)
+    }
+
+    fun getSavedSelectedProvider(): OnlineDataProvider? {
+        val savedId = preferencesManager?.getSelectedProvider().orEmpty()
+        return OnlineDataProvider.entries.find { it.id == savedId || it.name == savedId }
+    }
+
+    fun saveSelectedProvider(provider: OnlineDataProvider) {
+        preferencesManager?.saveSelectedProvider(provider.id)
+    }
+
+    fun getSavedBrokerSuffix(): String {
+        return preferencesManager?.getBrokerSuffix() ?: ".sml"
+    }
+
+    fun saveBrokerSuffix(suffix: String) {
+        preferencesManager?.saveBrokerSuffix(suffix)
+    }
+
+    fun isTradeNotificationsEnabled(): Boolean {
+        return preferencesManager?.isTradeNotificationsEnabled() ?: true
+    }
+
+    fun saveTradeNotificationsEnabled(enabled: Boolean) {
+        preferencesManager?.saveTradeNotificationsEnabled(enabled)
+    }
 
     fun getInstalledReleaseTag(): String = remoteService.getInstalledReleaseTag()
 

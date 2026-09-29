@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,22 +17,22 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddAlert
 import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.CandlestickChart
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -46,19 +47,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.model.CompleteHubAnalysis
-import com.example.model.MacroSentiment
+import com.example.model.MarketSymbol
 import com.example.model.NewsImpactLevel
 import com.example.model.PatternBias
 import com.example.model.Timeframe
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
-import com.example.ui.theme.BullishBg
 import com.example.ui.theme.BullishEmerald
 import com.example.ui.theme.CyanSecondary
 import com.example.ui.theme.GoldBright
 import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NeutralAmber
-import com.example.ui.theme.NeutralBg
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.SlateCardBorder
 import com.example.ui.theme.SlateSurface
@@ -74,6 +73,9 @@ fun MtfMatrixScreen(
     modifier: Modifier = Modifier
 ) {
     val mtf = analysis.mtfEngine
+    val bullCount = mtf.rows.count { it.bias == PatternBias.BULLISH }
+    val bearCount = mtf.rows.count { it.bias == PatternBias.BEARISH }
+    val neutralCount = mtf.rows.count { it.bias == PatternBias.NEUTRAL }
 
     LazyColumn(
         modifier = modifier
@@ -84,7 +86,7 @@ fun MtfMatrixScreen(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
-        // Kartu Ringkasan Prioritas Multi-Timeframe (H1 -> M30 -> M15 -> M5 -> M1)
+        // 1. KARTU RINGKASAN EKSEKUTIF MULTI-TIMEFRAME (H1 -> M30 -> M15 -> M5 -> M1)
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
@@ -92,6 +94,7 @@ fun MtfMatrixScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.5.dp, GoldPrimary, RoundedCornerShape(16.dp))
+                    .testTag("mtf_executive_card")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -102,61 +105,112 @@ fun MtfMatrixScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "10. MESIN MULTI-TIMEFRAME (H1 ↓ M1)",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = GoldBright
-                        )
-                        Surface(
-                            color = if (mtf.isPullbackInHtfTrend) NeutralBg else BullishBg,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.border(
-                                1.dp,
-                                if (mtf.isPullbackInHtfTrend) NeutralAmber else BullishEmerald,
-                                RoundedCornerShape(8.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Timeline,
+                                contentDescription = null,
+                                tint = GoldBright,
+                                modifier = Modifier.size(20.dp)
                             )
+                            Text(
+                                text = "MATRIKS MULTI-TIMEFRAME (H1 ↓ M1)",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        val badgeColor = when {
+                            mtf.isPullbackInHtfTrend -> NeutralAmber
+                            mtf.htfBias == PatternBias.BULLISH -> BullishEmerald
+                            mtf.htfBias == PatternBias.BEARISH -> BearishCrimson
+                            else -> GoldBright
+                        }
+                        val badgeLabel = when {
+                            mtf.isPullbackInHtfTrend -> "SEDANG PULLBACK"
+                            mtf.htfBias == PatternBias.BULLISH -> "HTF BULLISH NAIK"
+                            mtf.htfBias == PatternBias.BEARISH -> "HTF BEARISH TURUN"
+                            else -> "KONSOLIDASI"
+                        }
+
+                        Surface(
+                            color = badgeColor.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(1.dp, badgeColor, RoundedCornerShape(8.dp))
                         ) {
                             Text(
-                                text = if (mtf.isPullbackInHtfTrend) "SEDANG PULLBACK" else "SEARAH TF BESAR",
+                                text = badgeLabel,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (mtf.isPullbackInHtfTrend) NeutralAmber else BullishEmerald,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                color = badgeColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
                     Text(
-                        text = "Urutan Prioritas: H1 → M30 → M15 (Penentu Arah Utama) → M5 → M1 (Konfirmasi)",
+                        text = "Instrumen: ${analysis.symbol.code} • Timeframe Aktif: ${analysis.activeTimeframe.label} • Urutan Prioritas: H1 → M30 → M15 → M5 → M1",
                         style = MaterialTheme.typography.labelSmall,
                         color = CyanSecondary
                     )
 
                     HorizontalDivider(color = SlateCardBorder)
 
+                    // Keselarasan 5 Timeframe
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
-                            Text("Arah TF Besar (H1/M30/M15)", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                            Text(
-                                text = mtf.htfBias.label,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = when (mtf.htfBias) {
-                                    PatternBias.BULLISH -> BullishEmerald
-                                    PatternBias.BEARISH -> BearishCrimson
-                                    PatternBias.NEUTRAL -> GoldBright
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                color = BullishEmerald.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.border(1.dp, BullishEmerald.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            ) {
+                                Text(
+                                    text = "$bullCount/5 NAIK",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = BullishEmerald,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            Surface(
+                                color = BearishCrimson.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.border(1.dp, BearishCrimson.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            ) {
+                                Text(
+                                    text = "$bearCount/5 TURUN",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = BearishCrimson,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                            if (neutralCount > 0) {
+                                Surface(
+                                    color = NeutralAmber.copy(alpha = 0.16f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.border(1.dp, NeutralAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                                ) {
+                                    Text(
+                                        text = "$neutralCount/5 NETRAL",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = NeutralAmber,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
                                 }
-                            )
+                            }
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text("Kondisi TF Kecil (M5/M1)", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                            Text(
-                                text = mtf.ltfState,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = CyanSecondary
-                            )
-                        }
+
+                        Text(
+                            text = mtf.ltfState,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanSecondary
+                        )
                     }
 
                     Box(
@@ -167,7 +221,7 @@ fun MtfMatrixScreen(
                             .padding(10.dp)
                     ) {
                         Text(
-                            text = "Kesimpulan MTF: ${mtf.executiveConclusion}",
+                            text = "Kesimpulan Eksekutif MTF: ${mtf.executiveConclusion}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextPrimary
                         )
@@ -176,7 +230,123 @@ fun MtfMatrixScreen(
             }
         }
 
-        // Baris Prioritas H1 -> M30 -> M15 -> M5 -> M1
+        // 2. TABEL KOMPARASI CEPAT MATRIKS (QUICK MATRIX COMPARISON GRID)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SlateCardBorder, RoundedCornerShape(14.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "TABEL KOMPARASI LENGKAP 5 TIMEFRAME:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = GoldBright
+                    )
+
+                    val scrollState = rememberScrollState()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(scrollState)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Header Row
+                            Row(
+                                modifier = Modifier
+                                    .background(SlateSurfaceElevated, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Text("TF", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(36.dp))
+                                Text("BIAS", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(60.dp))
+                                Text("TREN EMA", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(110.dp))
+                                Text("STRUKTUR", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(120.dp))
+                                Text("RSI(14)", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(50.dp))
+                                Text("ADX(14)", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(50.dp))
+                                Text("POLA CANDLE [1]", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(130.dp))
+                            }
+
+                            mtf.rows.forEach { row ->
+                                val isCurrentTf = row.timeframe == analysis.activeTimeframe
+                                val biasColor = when (row.bias) {
+                                    PatternBias.BULLISH -> BullishEmerald
+                                    PatternBias.BEARISH -> BearishCrimson
+                                    PatternBias.NEUTRAL -> NeutralAmber
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isCurrentTf) GoldPrimary.copy(alpha = 0.12f) else SlateSurfaceElevated.copy(alpha = 0.4f))
+                                        .clickable { onSelectTimeframe(row.timeframe) }
+                                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "${row.timeframe.label}${if (isCurrentTf) "*" else ""}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isCurrentTf) GoldBright else TextPrimary,
+                                        fontWeight = if (isCurrentTf) FontWeight.Bold else FontWeight.Normal,
+                                        modifier = Modifier.width(36.dp)
+                                    )
+                                    Text(
+                                        text = row.bias.label.take(7),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = biasColor,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.width(60.dp)
+                                    )
+                                    Text(
+                                        text = row.trend.label,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextPrimary,
+                                        modifier = Modifier.width(110.dp)
+                                    )
+                                    Text(
+                                        text = row.structure.label,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = TextPrimary,
+                                        modifier = Modifier.width(120.dp)
+                                    )
+                                    Text(
+                                        text = String.format(Locale.US, "%.1f", row.rsi14),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = CyanSecondary,
+                                        modifier = Modifier.width(50.dp)
+                                    )
+                                    Text(
+                                        text = String.format(Locale.US, "%.1f", row.adx14),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = CyanSecondary,
+                                        modifier = Modifier.width(50.dp)
+                                    )
+                                    Text(
+                                        text = row.closedPatternName,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = GoldBright,
+                                        modifier = Modifier.width(130.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        text = "* Ketuk baris mana saja untuk langsung beralih ke grafik timeframe tersebut.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary
+                    )
+                }
+            }
+        }
+
+        // 3. KARTU DETAIL TIAP TIMEFRAME (HIERARKI H1 -> M30 -> M15 -> M5 -> M1)
         items(mtf.rows, key = { it.timeframe.name }) { row ->
             val isCurrentTf = row.timeframe == analysis.activeTimeframe
             val biasColor = when (row.bias) {
@@ -219,18 +389,20 @@ fun MtfMatrixScreen(
                                         .clip(RoundedCornerShape(8.dp))
                                         .background(GoldPrimary)
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
-                                ) {
+                                    ) {
                                     Text(
                                         text = "${row.timeframe.label} (Prioritas #${row.timeframe.priorityRank})",
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = ObsidianBg
+                                        color = ObsidianBg,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                                 if (isCurrentTf) {
                                     Text(
                                         text = "• GRAFIK AKTIF",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = CyanSecondary
+                                        color = CyanSecondary,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
@@ -244,7 +416,8 @@ fun MtfMatrixScreen(
                                     text = row.bias.label,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = biasColor,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                         }
@@ -282,6 +455,25 @@ fun MtfMatrixScreen(
                                 )
                             }
                         }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CandlestickChart,
+                                contentDescription = null,
+                                tint = CyanSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Ketuk untuk buka grafik ${row.timeframe.label}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CyanSecondary
+                            )
+                        }
                     }
                 }
 
@@ -302,15 +494,27 @@ fun MtfMatrixScreen(
     }
 }
 
+private enum class NewsFilterOption(val label: String) {
+    ALL("Semua"),
+    HIGH_IMPACT("Dampak Tinggi"),
+    XAUUSD("Emas (XAUUSD)"),
+    EURUSD("Euro (EURUSD)")
+}
+
 @Composable
 fun NewsEngineScreen(
     analysis: CompleteHubAnalysis,
-    onRefreshNews: () -> Unit,
-    onAddCustomEvent: (String, String, String, NewsImpactLevel, MacroSentiment, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val newsEngine = analysis.newsEngine
-    var showAddDialog by remember { mutableStateOf(false) }
+    var selectedFilter by remember { mutableStateOf(NewsFilterOption.ALL) }
+
+    val filteredArticles = when (selectedFilter) {
+        NewsFilterOption.ALL -> newsEngine.articles
+        NewsFilterOption.HIGH_IMPACT -> newsEngine.articles.filter { it.impact == NewsImpactLevel.HIGH }
+        NewsFilterOption.XAUUSD -> newsEngine.articles.filter { MarketSymbol.XAUUSD in it.affectedSymbols }
+        NewsFilterOption.EURUSD -> newsEngine.articles.filter { MarketSymbol.EURUSD in it.affectedSymbols }
+    }
 
     LazyColumn(
         modifier = modifier
@@ -321,7 +525,7 @@ fun NewsEngineScreen(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
-        // 11. MESIN BERITA (KOMPONEN WAJIB)
+        // 1. KARTU UTAMA MESIN BERITA MAKRO & KALENDER OTOMATIS
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
@@ -329,6 +533,7 @@ fun NewsEngineScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(1.5.dp, GoldPrimary, RoundedCornerShape(16.dp))
+                    .testTag("news_header_card")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -341,12 +546,13 @@ fun NewsEngineScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "11. MESIN BERITA EKONOMI (WAJIB)",
+                                text = "11. KALENDER & BERITA MAKRO OTOMATIS",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = GoldBright
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Fokus ${analysis.symbol.code}: USD, Federal Reserve, FOMC, Suku Bunga, Inflasi CPI, NFP, ECB",
+                                text = "Fokus ${analysis.symbol.code}: Federal Reserve, FOMC, Suku Bunga, CPI, NFP, ECB & Geopolitik",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = CyanSecondary
                             )
@@ -360,201 +566,230 @@ fun NewsEngineScreen(
                                 text = "${newsEngine.highImpactCount} DAMPAK TINGGI",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = BearishCrimson,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
 
                     Text(
                         text = "Sentimen Makro Dominan: ${newsEngine.dominantSentiment.label}",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = TextPrimary
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.SemiBold
                     )
 
+                    HorizontalDivider(color = SlateCardBorder)
+
+                    // Indikator Sinkronisasi Otomatis & Pembersihan Usang Aktif
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = onRefreshNews,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("sync_live_news_button")
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = CyanSecondary)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Perbarui Berita", style = MaterialTheme.typography.labelMedium, color = CyanSecondary)
+                            Icon(
+                                imageVector = Icons.Default.Public,
+                                contentDescription = null,
+                                tint = if (newsEngine.isLiveRssSynced) BullishEmerald else NeutralAmber,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = if (newsEngine.isLiveRssSynced) "Smart Auto-Sync Aktif • Kalender & Berita Riil Terisi Otomatis" else "Mode Cadangan Offline",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (newsEngine.isLiveRssSynced) BullishEmerald else NeutralAmber,
+                                fontWeight = FontWeight.Medium
+                            )
                         }
+                        Text(
+                            text = formatEpochSec(newsEngine.lastUpdatedMs / 1000L),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary
+                        )
+                    }
 
-                        Button(
-                            onClick = { showAddDialog = true },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = GoldPrimary,
-                                contentColor = ObsidianBg
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("add_custom_news_button")
-                        ) {
-                            Icon(Icons.Default.AddAlert, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Catat Jadwal FOMC/CPI", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = "✓ Berita & jadwal yang telah usang (>24 jam) otomatis dibersihkan. Kalender ekonomi mingguan selalu segar.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanSecondary
+                    )
+                }
+            }
+        }
+
+        // 2. PERINGATAN RISIKO VOLATILITAS MAKRO & SPREAD (JIKA ADA 2+ BERITA HIGH IMPACT)
+        if (newsEngine.newsRiskWarning != null || newsEngine.highImpactCount >= 2) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, NeutralAmber, RoundedCornerShape(14.dp))
+                        .testTag("news_risk_warning_card")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = NeutralAmber,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = "PELINDUNG RISIKO MAKRO & PELEBARAN SPREAD",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = NeutralAmber,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = newsEngine.newsRiskWarning
+                                    ?: "Terdapat ${newsEngine.highImpactCount} agenda berita berdampak tinggi aktif. Perlebar jarak batas risiko (Stop Loss berbasis ATR) dan jangan mengeksekusi saat candle masih berjalan [0].",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Daftar Berita Ekonomi
-        items(newsEngine.articles, key = { it.id }) { article ->
-            val impactColor = when (article.impact) {
-                NewsImpactLevel.HIGH -> BearishCrimson
-                NewsImpactLevel.MEDIUM -> NeutralAmber
-                NewsImpactLevel.LOW -> CyanSecondary
-            }
-
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SlateSurfaceElevated),
-                shape = RoundedCornerShape(14.dp),
+        // 3. FILTER CHIP KATEGORI & DAMPAK
+        item {
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SlateCardBorder, RoundedCornerShape(14.dp))
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = article.categoryTag,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = GoldBright
-                        )
-                        Surface(
-                            color = impactColor.copy(alpha = 0.16f),
-                            shape = RoundedCornerShape(6.dp),
-                            modifier = Modifier.border(1.dp, impactColor, RoundedCornerShape(6.dp))
-                        ) {
-                            Text(
-                                text = article.impact.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = impactColor,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = article.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = TextPrimary,
-                        fontWeight = FontWeight.Bold
+                NewsFilterOption.entries.forEach { opt ->
+                    FilterChip(
+                        selected = selectedFilter == opt,
+                        onClick = { selectedFilter = opt },
+                        label = {
+                            val count = when (opt) {
+                                NewsFilterOption.ALL -> newsEngine.articles.size
+                                NewsFilterOption.HIGH_IMPACT -> newsEngine.articles.count { it.impact == NewsImpactLevel.HIGH }
+                                NewsFilterOption.XAUUSD -> newsEngine.articles.count { MarketSymbol.XAUUSD in it.affectedSymbols }
+                                NewsFilterOption.EURUSD -> newsEngine.articles.count { MarketSymbol.EURUSD in it.affectedSymbols }
+                            }
+                            Text("${opt.label} ($count)", style = MaterialTheme.typography.labelSmall)
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = GoldPrimary,
+                            selectedLabelColor = ObsidianBg
+                        ),
+                        modifier = Modifier.testTag("filter_chip_${opt.name.lowercase()}")
                     )
+                }
+            }
+        }
 
+        // 4. DAFTAR BERITA MAKRO & KALENDER EKONOMI TERSINKRONISASI
+        if (filteredArticles.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
                     Text(
-                        text = article.keyTakeaway,
+                        text = "Tidak ada berita aktif yang cocok dengan filter yang dipilih.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = TextSecondary
                     )
+                }
+            }
+        } else {
+            items(filteredArticles, key = { it.id }) { article ->
+                val impactColor = when (article.impact) {
+                    NewsImpactLevel.HIGH -> BearishCrimson
+                    NewsImpactLevel.MEDIUM -> NeutralAmber
+                    NewsImpactLevel.LOW -> CyanSecondary
+                }
 
-                    HorizontalDivider(color = SlateCardBorder)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = SlateSurfaceElevated),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, SlateCardBorder, RoundedCornerShape(14.dp))
+                        .testTag("news_item_${article.id}")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = article.categoryTag,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = GoldBright
+                            )
+                            Surface(
+                                color = impactColor.copy(alpha = 0.16f),
+                                shape = RoundedCornerShape(6.dp),
+                                modifier = Modifier.border(1.dp, impactColor, RoundedCornerShape(6.dp))
+                            ) {
+                                Text(
+                                    text = article.impact.label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = impactColor,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
                         Text(
-                            text = article.sentiment.label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = CyanSecondary
+                            text = article.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.Bold
                         )
+
                         Text(
-                            text = "${article.sourceName} • ${formatEpochSec(article.publishedTimeEpochSec)}",
-                            style = MaterialTheme.typography.labelSmall,
+                            text = article.keyTakeaway,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = TextSecondary
                         )
+
+                        HorizontalDivider(color = SlateCardBorder)
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = article.sentiment.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CyanSecondary,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${article.sourceName} • ${formatEpochSec(article.publishedTimeEpochSec)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
                     }
                 }
             }
         }
 
         item { Spacer(modifier = Modifier.height(16.dp)) }
-    }
-
-    if (showAddDialog) {
-        var titleInput by remember { mutableStateOf("") }
-        var categoryInput by remember { mutableStateOf("Federal Reserve • Suku Bunga FOMC") }
-        var takeawayInput by remember { mutableStateOf("") }
-        var selectedImpact by remember { mutableStateOf(NewsImpactLevel.HIGH) }
-        var selectedSentiment by remember { mutableStateOf(MacroSentiment.DOVISH_USD_BULLISH_GOLD) }
-
-        AlertDialog(
-            onDismissRequest = { showAddDialog = false },
-            title = { Text("Tambah Jadwal Berita Ekonomi") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = titleInput,
-                        onValueChange = { titleInput = it },
-                        label = { Text("Judul Berita (misal: Pengumuman Suku Bunga FOMC)") },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("news_title_input")
-                    )
-                    OutlinedTextField(
-                        value = categoryInput,
-                        onValueChange = { categoryInput = it },
-                        label = { Text("Kategori (USD, FOMC, Suku Bunga, CPI, ECB)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = takeawayInput,
-                        onValueChange = { takeawayInput = it },
-                        label = { Text("Catatan Dampak ke Pasar") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        NewsImpactLevel.entries.forEach { imp ->
-                            FilterChip(
-                                selected = selectedImpact == imp,
-                                onClick = { selectedImpact = imp },
-                                label = { Text(imp.label, style = MaterialTheme.typography.labelSmall) }
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onAddCustomEvent(
-                            titleInput,
-                            categoryInput,
-                            "BOTH",
-                            selectedImpact,
-                            selectedSentiment,
-                            takeawayInput
-                        )
-                        showAddDialog = false
-                    },
-                    modifier = Modifier.testTag("confirm_add_news_button")
-                ) {
-                    Text("Simpan Berita")
-                }
-            },
-            dismissButton = {
-                OutlinedButton(onClick = { showAddDialog = false }) {
-                    Text("Batal")
-                }
-            }
-        )
     }
 }

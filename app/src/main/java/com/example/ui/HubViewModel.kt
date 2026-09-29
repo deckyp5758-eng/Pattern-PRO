@@ -41,9 +41,10 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 enum class HubTab(val title: String) {
-    HUD_CHART("Grafik HUD"),
-    ENGINES("10 Mesin"),
-    MTF_MATRIX("Matriks MTF"),
+    HUD_CHART("Grafik"),
+    TRADE("Trade"),
+    ENGINES("Mesin"),
+    MTF_MATRIX("Matriks"),
     NEWS_ENGINE("Berita"),
     MQL5_STUDIO("Kode MQL5")
 }
@@ -64,6 +65,7 @@ data class HubUiState(
     val showSrZones: Boolean = true,
     val showStructureSwings: Boolean = true,
     val isLiveTickMonitorEnabled: Boolean = true,
+    val isTradeNotificationEnabled: Boolean = true,
     val mql5Config: Mql5ConfigParams = Mql5ConfigParams(),
     val generatedMql5Code: String = "",
     val diagnostics: SystemDiagnosticReport = SystemDiagnosticReport(),
@@ -71,6 +73,7 @@ data class HubUiState(
     val githubRelease: GitHubReleaseInfo = GitHubReleaseInfo(),
     val metaApiAccountIdInput: String = "",
     val metaApiAuthTokenInput: String = "",
+    val hasCustomSavedCredentials: Boolean = false,
     val statusBannerMessage: String? = null
 )
 
@@ -80,17 +83,20 @@ class HubViewModel(
 
     private val _uiState = MutableStateFlow(
         HubUiState(
-            selectedProvider = if (repository.isMetaApiConfigured()) {
+            selectedProvider = repository.getSavedSelectedProvider() ?: if (repository.isMetaApiConfigured()) {
                 OnlineDataProvider.ELEV8_METAAPI
             } else {
                 OnlineDataProvider.BINANCE_VISION
             },
+            brokerSuffix = repository.getSavedBrokerSuffix(),
             githubRelease = GitHubReleaseInfo(
                 repository = repository.getDefaultGitHubRepository(),
                 installedTag = repository.getInstalledReleaseTag()
             ),
+            isTradeNotificationEnabled = repository.isTradeNotificationsEnabled(),
             metaApiAccountIdInput = repository.getMetaApiAccountId(),
-            metaApiAuthTokenInput = repository.getMetaApiAuthToken()
+            metaApiAuthTokenInput = repository.getMetaApiAuthToken(),
+            hasCustomSavedCredentials = repository.hasCustomMetaApiCredentials()
         )
     )
     val uiState: StateFlow<HubUiState> = _uiState.asStateFlow()
@@ -149,6 +155,7 @@ class HubViewModel(
 
     fun selectProvider(provider: OnlineDataProvider) {
         if (_uiState.value.selectedProvider == provider) return
+        repository.saveSelectedProvider(provider)
         val newGen = requestGenerationId.incrementAndGet()
         auditJob?.cancel()
         _uiState.update {
@@ -226,6 +233,7 @@ class HubViewModel(
 
     fun updateBrokerSuffix(suffix: String) {
         if (_uiState.value.brokerSuffix == suffix) return
+        repository.saveBrokerSuffix(suffix)
         _uiState.update { state ->
             val updatedConfig = state.mql5Config.copy(brokerSuffix = suffix)
             state.copy(brokerSuffix = suffix, mql5Config = updatedConfig)
@@ -262,6 +270,21 @@ class HubViewModel(
             )
         }
         appendDiagnosticLog("Polling Server Candle [0]: ${if (nextState) "AKTIF" else "DIJEDA"}")
+    }
+
+    fun toggleTradeNotificationAlerts(enabled: Boolean) {
+        repository.saveTradeNotificationsEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                isTradeNotificationEnabled = enabled,
+                statusBannerMessage = if (enabled) {
+                    "Notifikasi Sinyal Trade HP Diaktifkan (Push Alert Siap)."
+                } else {
+                    "Notifikasi Sinyal Trade HP Dinonaktifkan."
+                }
+            )
+        }
+        appendDiagnosticLog("Notifikasi Sinyal Trade HP: ${if (enabled) "AKTIF" else "NONAKTIF"}")
     }
 
     /**
@@ -810,6 +833,10 @@ class HubViewModel(
     }
 
     fun updateGitHubRepoInput(repo: String) {
+        val clean = repo.trim()
+        if (clean.isNotBlank()) {
+            repository.saveCustomGitHubRepository(clean)
+        }
         _uiState.update { state ->
             state.copy(
                 githubRelease = state.githubRelease.copy(repository = repo)
@@ -834,13 +861,31 @@ class HubViewModel(
             return
         }
         repository.setCustomMetaApiCredentials(accId, token)
+        repository.saveSelectedProvider(OnlineDataProvider.ELEV8_METAAPI)
         _uiState.update {
             it.copy(
                 selectedProvider = OnlineDataProvider.ELEV8_METAAPI,
-                statusBannerMessage = "Kredensial Elev8 MT5 disimpan. Menghubungkan ke MetaApi Cloud..."
+                hasCustomSavedCredentials = true,
+                statusBannerMessage = "Kredensial Elev8 MT5 tersimpan permanen di penyimpanan lokal aplikasi. Menghubungkan ke MetaApi Cloud..."
             )
         }
+        appendDiagnosticLog("Kredensial MetaApi tersimpan permanen (Account ID: ${accId.take(8)}...)")
         refreshMarketData(forceRefreshNews = false)
+    }
+
+    fun clearSavedMetaApiCredentials() {
+        repository.clearCustomMetaApiCredentials()
+        val defaultAcc = repository.getMetaApiAccountId()
+        val defaultToken = repository.getMetaApiAuthToken()
+        _uiState.update {
+            it.copy(
+                metaApiAccountIdInput = defaultAcc,
+                metaApiAuthTokenInput = defaultToken,
+                hasCustomSavedCredentials = false,
+                statusBannerMessage = "Kredensial tersimpan telah dihapus dari penyimpanan perangkat."
+            )
+        }
+        appendDiagnosticLog("Kredensial kustom MetaApi dihapus dari penyimpanan lokal.")
     }
 
     fun checkGitHubReleaseUpdate() {

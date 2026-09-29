@@ -109,6 +109,10 @@ fun HudTerminalScreen(
     onClearAllSnapshots: () -> Unit,
     onUpdateGitHubRepo: (String) -> Unit = {},
     onCheckGitHubUpdate: () -> Unit = {},
+    onUpdateMetaApiAccountId: (String) -> Unit = {},
+    onUpdateMetaApiAuthToken: (String) -> Unit = {},
+    onSaveMetaApiCredentials: () -> Unit = {},
+    onClearMetaApiCredentials: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -865,6 +869,118 @@ fun HudTerminalScreen(
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6C. Konfigurasi Kredensial Elev8 MT5 (MetaApi) - Disimpan Permanen di Perangkat
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        1.dp,
+                        if (uiState.selectedProvider == OnlineDataProvider.ELEV8_METAAPI) GoldPrimary else SlateCardBorder,
+                        RoundedCornerShape(16.dp)
+                    )
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = GoldBright,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "KREDENSIAL ELEV8 MT5 (DISIMPAN PERMANEN)",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright
+                            )
+                        }
+                        if (uiState.hasCustomSavedCredentials) {
+                            Text(
+                                text = "TERSIMPAN DI HP",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = BullishEmerald,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Kredensial Anda disimpan langsung ke penyimpanan internal privat HP (SharedPreferences). Data tetap aman tersimpan saat aplikasi ditutup atau HP di-restart tanpa perlu re-build APK.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.metaApiAccountIdInput,
+                        onValueChange = onUpdateMetaApiAccountId,
+                        label = { Text("Account ID MetaApi (Elev8)", style = MaterialTheme.typography.labelSmall) },
+                        placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("terminal_metaapi_account_id_input")
+                    )
+
+                    OutlinedTextField(
+                        value = uiState.metaApiAuthTokenInput,
+                        onValueChange = onUpdateMetaApiAuthToken,
+                        label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
+                        placeholder = { Text("Token dari app.metaapi.cloud/token", style = MaterialTheme.typography.labelSmall) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("terminal_metaapi_auth_token_input")
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onSaveMetaApiCredentials,
+                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("terminal_save_metaapi_button")
+                        ) {
+                            Text(
+                                text = "SIMPAN & SAMBUNGKAN",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        if (uiState.hasCustomSavedCredentials || uiState.metaApiAccountIdInput.isNotBlank()) {
+                            OutlinedButton(
+                                onClick = onClearMetaApiCredentials,
+                                modifier = Modifier.testTag("terminal_clear_metaapi_button")
+                            ) {
+                                Text(
+                                    text = "Hapus",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = BearishCrimson
+                                )
+                            }
                         }
                     }
                 }

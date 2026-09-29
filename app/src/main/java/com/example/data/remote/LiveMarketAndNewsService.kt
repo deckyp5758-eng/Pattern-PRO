@@ -22,8 +22,11 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import com.example.data.local.UserPreferencesManager
 
-class LiveMarketAndNewsService {
+class LiveMarketAndNewsService(
+    private val preferencesManager: UserPreferencesManager? = null
+) {
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -213,13 +216,45 @@ class LiveMarketAndNewsService {
     @Volatile
     private var customMetaApiRegion: String? = null
 
-    fun setCustomMetaApiCredentials(accountId: String, authToken: String, region: String? = null) {
-        customMetaApiAccountId = accountId.trim()
-        customMetaApiAuthToken = authToken.trim()
-        if (!region.isNullOrBlank()) {
-            customMetaApiRegion = region.trim()
-            discoveredMetaApiRegion = region.trim()
+    init {
+        preferencesManager?.let { prefs ->
+            val savedAcc = prefs.getMetaApiAccountId()
+            val savedTok = prefs.getMetaApiAuthToken()
+            val savedReg = prefs.getMetaApiRegion()
+            if (savedAcc.isNotBlank()) customMetaApiAccountId = savedAcc
+            if (savedTok.isNotBlank()) customMetaApiAuthToken = savedTok
+            if (!savedReg.isNullOrBlank()) {
+                customMetaApiRegion = savedReg
+                discoveredMetaApiRegion = savedReg
+            }
         }
+    }
+
+    fun setCustomMetaApiCredentials(accountId: String, authToken: String, region: String? = null) {
+        val cleanAcc = accountId.trim()
+        val cleanTok = authToken.trim()
+        val cleanReg = region?.trim()
+        customMetaApiAccountId = cleanAcc
+        customMetaApiAuthToken = cleanTok
+        if (!cleanReg.isNullOrBlank()) {
+            customMetaApiRegion = cleanReg
+            discoveredMetaApiRegion = cleanReg
+        }
+        preferencesManager?.saveMetaApiCredentials(cleanAcc, cleanTok, cleanReg)
+    }
+
+    fun clearCustomMetaApiCredentials() {
+        customMetaApiAccountId = null
+        customMetaApiAuthToken = null
+        customMetaApiRegion = null
+        discoveredMetaApiRegion = null
+        discoveredElev8Symbol.clear()
+        preferencesManager?.clearMetaApiCredentials()
+    }
+
+    fun hasCustomCredentials(): Boolean {
+        return preferencesManager?.hasCustomCredentials() == true ||
+            (!customMetaApiAccountId.isNullOrBlank() && !customMetaApiAuthToken.isNullOrBlank())
     }
 
     fun getMetaApiAccountId(): String {
@@ -967,13 +1002,18 @@ class LiveMarketAndNewsService {
             )
         }
 
+        val nowSec = System.currentTimeMillis() / 1000L
+        val staleThresholdSec = nowSec - (24L * 3600L) // Hapus otomatis event kalender & berita yang sudah lewat lebih dari 24 jam
+
         val sorted = collected
+            .filter { it.publishedTimeEpochSec >= staleThresholdSec }
             .distinctBy { it.title }
             .sortedWith(
                 compareByDescending<MacroNewsArticle> { it.impact == NewsImpactLevel.HIGH }
-                    .thenByDescending { it.publishedTimeEpochSec }
+                    .thenByDescending { it.publishedTimeEpochSec >= nowSec } // Prioritaskan agenda hari ini & mendatang
+                    .thenBy { if (it.publishedTimeEpochSec >= nowSec) it.publishedTimeEpochSec else -it.publishedTimeEpochSec }
             )
-            .take(25)
+            .take(30)
 
         NewsFetchOutcome.Success(
             articles = sorted,
@@ -1146,12 +1186,18 @@ class LiveMarketAndNewsService {
     }
 
     fun getDefaultGitHubRepository(): String {
+        val saved = preferencesManager?.getGitHubRepository().orEmpty()
+        if (saved.isNotBlank()) return saved
         val raw = runCatching { BuildConfig.GITHUB_REPOSITORY }.getOrDefault("").trim()
         return if (raw.isEmpty() || raw.startsWith("YOUR_GITHUB_USER") || raw == "null") {
             ""
         } else {
             raw
         }
+    }
+
+    fun saveCustomGitHubRepository(repo: String) {
+        preferencesManager?.saveGitHubRepository(repo)
     }
 
     fun getInstalledReleaseTag(): String {
