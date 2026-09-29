@@ -204,11 +204,38 @@ class LiveMarketAndNewsService {
 
     private val discoveredElev8Symbol = java.util.concurrent.ConcurrentHashMap<MarketSymbol, String>()
 
-    private fun getMetaApiAccountId(): String = BuildConfig.METAAPI_ACCOUNT_ID.trim()
+    @Volatile
+    private var customMetaApiAccountId: String? = null
 
-    private fun getMetaApiAuthToken(): String = BuildConfig.METAAPI_AUTH_TOKEN.trim()
+    @Volatile
+    private var customMetaApiAuthToken: String? = null
 
-    private fun getMetaApiRegion(): String = discoveredMetaApiRegion ?: "new-york"
+    @Volatile
+    private var customMetaApiRegion: String? = null
+
+    fun setCustomMetaApiCredentials(accountId: String, authToken: String, region: String? = null) {
+        customMetaApiAccountId = accountId.trim()
+        customMetaApiAuthToken = authToken.trim()
+        if (!region.isNullOrBlank()) {
+            customMetaApiRegion = region.trim()
+            discoveredMetaApiRegion = region.trim()
+        }
+    }
+
+    fun getMetaApiAccountId(): String {
+        customMetaApiAccountId?.let { if (it.isNotBlank()) return it }
+        return runCatching { BuildConfig.METAAPI_ACCOUNT_ID.trim() }.getOrDefault("")
+    }
+
+    fun getMetaApiAuthToken(): String {
+        customMetaApiAuthToken?.let { if (it.isNotBlank()) return it }
+        return runCatching { BuildConfig.METAAPI_AUTH_TOKEN.trim() }.getOrDefault("")
+    }
+
+    fun getMetaApiRegion(): String {
+        customMetaApiRegion?.let { if (it.isNotBlank()) return it }
+        return discoveredMetaApiRegion ?: "new-york"
+    }
 
     private fun getElev8SymbolWithSuffix(symbol: MarketSymbol): String {
         return discoveredElev8Symbol[symbol] ?: symbol.code
@@ -224,33 +251,44 @@ class LiveMarketAndNewsService {
     }
 
     /**
-     * Mendeteksi otomatis region akun MetaApi dari Provisioning API (`mt-provisioning-api-v1.agiliumtrade.ai`)
-     * dan mendeteksi nama simbol persis pada broker MT5 Elev8 (`XAUUSD`, `XAUUSD.sml`, `XAUUSDm`, dll.)
+     * Mendeteksi otomatis region akun MetaApi dari Provisioning API
+     * dan mendeteksi nama simbol persis pada broker MT5 Elev8 (XAUUSD, XAUUSD.sml, XAUUSDm, dll.)
      */
     private fun discoverMetaApiRegionIfNeeded(accountId: String, authToken: String): String? {
         discoveredMetaApiRegion?.let { return it }
-        return runCatching {
-            val provUrl = "https://mt-provisioning-api-v1.agiliumtrade.ai/users/current/accounts/$accountId"
-            val req = Request.Builder()
-                .url(provUrl)
-                .header("auth-token", authToken)
-                .header("Accept", "application/json")
-                .build()
-            okHttpClient.newCall(req).execute().use { resp ->
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string().orEmpty()
-                    if (body.isNotBlank()) {
-                        val json = JSONObject(body)
-                        val region = json.optString("region", "").trim()
-                        if (region.isNotEmpty()) {
-                            discoveredMetaApiRegion = region
-                            return@runCatching region
+        val provHosts = listOf(
+            "https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai",
+            "https://mt-provisioning-api-v1.agiliumtrade.ai",
+            "https://mt-provisioning-api-v1.new-york.agiliumtrade.ai",
+            "https://mt-provisioning-api-v1.london.agiliumtrade.ai",
+            "https://mt-provisioning-api-v1.singapore.agiliumtrade.ai"
+        )
+        for (host in provHosts) {
+            val res = runCatching {
+                val provUrl = "$host/users/current/accounts/$accountId"
+                val req = Request.Builder()
+                    .url(provUrl)
+                    .header("auth-token", authToken)
+                    .header("Accept", "application/json")
+                    .build()
+                okHttpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string().orEmpty()
+                        if (body.isNotBlank()) {
+                            val json = JSONObject(body)
+                            val region = json.optString("region", "").trim()
+                            if (region.isNotEmpty()) {
+                                discoveredMetaApiRegion = region
+                                return@runCatching region
+                            }
                         }
                     }
+                    null
                 }
-                null
-            }
-        }.getOrNull()
+            }.getOrNull()
+            if (!res.isNullOrBlank()) return res
+        }
+        return null
     }
 
     private fun discoverBrokerSymbolIfNeeded(
@@ -260,48 +298,55 @@ class LiveMarketAndNewsService {
         symbol: MarketSymbol
     ): String? {
         discoveredElev8Symbol[symbol]?.let { return it }
-        return runCatching {
-            val symUrl = "https://mt-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$accountId/symbols"
-            val req = Request.Builder()
-                .url(symUrl)
-                .header("auth-token", authToken)
-                .header("Accept", "application/json")
-                .build()
-            okHttpClient.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string().orEmpty()
-                if (body.isBlank()) return@use null
-                val arr = JSONArray(body)
-                val allSymbols = mutableListOf<String>()
-                for (i in 0 until arr.length()) {
-                    val item = arr.optString(i, "").trim()
-                    if (item.isNotEmpty()) {
-                        allSymbols.add(item)
-                    } else {
-                        val objSym = arr.optJSONObject(i)?.optString("symbol", "")?.trim().orEmpty()
-                        if (objSym.isNotEmpty()) allSymbols.add(objSym)
+        val symHosts = listOf(
+            "https://mt-client-api-v1.$region.agiliumtrade.ai",
+            "https://mt-client-api-v1.$region.agiliumtrade.agiliumtrade.ai"
+        )
+        for (host in symHosts) {
+            val res = runCatching {
+                val symUrl = "$host/users/current/accounts/$accountId/symbols"
+                val req = Request.Builder()
+                    .url(symUrl)
+                    .header("auth-token", authToken)
+                    .header("Accept", "application/json")
+                    .build()
+                okHttpClient.newCall(req).execute().use { resp ->
+                    if (!resp.isSuccessful) return@use null
+                    val body = resp.body?.string().orEmpty()
+                    if (body.isBlank()) return@use null
+                    val arr = JSONArray(body)
+                    val allSymbols = mutableListOf<String>()
+                    for (i in 0 until arr.length()) {
+                        val item = arr.optString(i, "").trim()
+                        if (item.isNotEmpty()) {
+                            allSymbols.add(item)
+                        } else {
+                            val objSym = arr.optJSONObject(i)?.optString("symbol", "")?.trim().orEmpty()
+                            if (objSym.isNotEmpty()) allSymbols.add(objSym)
+                        }
                     }
+                    val configured = getElev8SymbolWithSuffix(symbol)
+                    val match = allSymbols.firstOrNull { it.equals(configured, ignoreCase = true) }
+                        ?: allSymbols.firstOrNull { it.equals(symbol.code, ignoreCase = true) }
+                        ?: allSymbols.firstOrNull { it.equals("${symbol.code}.sml", ignoreCase = true) }
+                        ?: allSymbols.firstOrNull { it.startsWith(symbol.code, ignoreCase = true) }
+                    if (!match.isNullOrEmpty()) {
+                        discoveredElev8Symbol[symbol] = match
+                    }
+                    match
                 }
-                val configured = getElev8SymbolWithSuffix(symbol)
-                val match = allSymbols.firstOrNull { it.equals(configured, ignoreCase = true) }
-                    ?: allSymbols.firstOrNull { it.equals(symbol.code, ignoreCase = true) }
-                    ?: allSymbols.firstOrNull { it.equals("${symbol.code}.sml", ignoreCase = true) }
-                    ?: allSymbols.firstOrNull { it.startsWith(symbol.code, ignoreCase = true) }
-                if (!match.isNullOrEmpty()) {
-                    discoveredElev8Symbol[symbol] = match
-                }
-                match
-            }
-        }.getOrNull()
+            }.getOrNull()
+            if (!res.isNullOrBlank()) return res
+        }
+        return null
     }
 
     /**
      * Konektor Resmi Elev8 MT5 Cloud via MetaApi:
-     * - Historical Candles: `https://mt-market-data-client-api-v1.<region>.agiliumtrade.ai`
-     * - Current Candle [0] & Symbols: `https://mt-client-api-v1.<region>.agiliumtrade.ai`
-     * - Jika kredensial belum diisi di panel Secrets AI Studio, atau jika kuota/masa uji coba 17 hari habis
-     *   (HTTP 401/402/403/404/429), langsung mengembalikan status OFFLINE secara jujur agar pengguna cukup
-     *   melakukan Top-Up / Deploy ulang di https://app.metaapi.cloud.
+     * - Historical Candles: mt-market-data-client-api-v1.<region>.agiliumtrade.ai (dan fallback agiliumtrade.agiliumtrade.ai)
+     * - Current Candle [0] & Symbols: mt-client-api-v1.<region>.agiliumtrade.ai (dan fallback agiliumtrade.agiliumtrade.ai)
+     * - Jika kredensial belum diisi atau masa uji coba habis (HTTP 401/402/403/404/429),
+     *   mengembalikan status OFFLINE secara jujur dengan pesan edukatif.
      */
     private suspend fun fetchElev8MetaApiRates(
         symbol: MarketSymbol,
@@ -314,7 +359,7 @@ class LiveMarketAndNewsService {
                 provider = OnlineDataProvider.ELEV8_METAAPI,
                 endpointUrl = defaultUrl,
                 httpStatusCode = 401,
-                errorMessage = "OFFLINE — Kredensial Elev8 MT5 (MetaApi) belum diisi. Masukkan METAAPI_ACCOUNT_ID dan METAAPI_AUTH_TOKEN di panel Secrets AI Studio (atau Top-Up di app.metaapi.cloud jika kuota habis).",
+                errorMessage = "OFFLINE — Kredensial Elev8 MT5 (MetaApi) belum diisi. Anda dapat memasukkan Account ID & Token langsung di tombol 'Konfigurasi Akun Elev8' di bawah ini.",
                 failedAtMs = fetchTimeMs
             )
         }
@@ -341,66 +386,76 @@ class LiveMarketAndNewsService {
 
             for (rawSym in symbolCandidates) {
                 val encodedSym = URLEncoder.encode(rawSym, "UTF-8").replace("+", "%20")
-                val histUrl = "https://mt-market-data-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$accountId/historical-market-data/symbols/$encodedSym/timeframes/$tfParam/candles?limit=500"
-                val currentUrl = "https://mt-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$accountId/symbols/$encodedSym/current-candles/$tfParam?keepSubscription=true"
-                lastUrl = histUrl
+                val domainCandidates = listOf(
+                    "https://mt-market-data-client-api-v1.$region.agiliumtrade.ai" to "https://mt-client-api-v1.$region.agiliumtrade.ai",
+                    "https://mt-market-data-client-api-v1.$region.agiliumtrade.agiliumtrade.ai" to "https://mt-client-api-v1.$region.agiliumtrade.agiliumtrade.ai"
+                )
 
-                try {
-                    val histReq = Request.Builder()
-                        .url(histUrl)
-                        .header("auth-token", authToken)
-                        .header("Accept", "application/json")
-                        .build()
+                for ((marketDataDomain, clientDomain) in domainCandidates) {
+                    val histUrl = "$marketDataDomain/users/current/accounts/$accountId/historical-market-data/symbols/$encodedSym/timeframes/$tfParam/candles?limit=500"
+                    val currentUrl = "$clientDomain/users/current/accounts/$accountId/symbols/$encodedSym/current-candles/$tfParam?keepSubscription=true"
+                    lastUrl = histUrl
 
-                    okHttpClient.newCall(histReq).execute().use { response ->
-                        val code = response.code
-                        val bodyStr = response.body?.string().orEmpty()
-                        lastHttpCode = code
+                    try {
+                        val histReq = Request.Builder()
+                            .url(histUrl)
+                            .header("auth-token", authToken)
+                            .header("Accept", "application/json")
+                            .build()
 
-                        if (code in 200..299 && bodyStr.isNotBlank()) {
-                            discoveredMetaApiRegion = region
-                            discoveredElev8Symbol[symbol] = rawSym
+                        okHttpClient.newCall(histReq).execute().use { response ->
+                            val code = response.code
+                            val bodyStr = response.body?.string().orEmpty()
+                            lastHttpCode = code
 
-                            // Ambil juga current-candle [0] yang sedang berjalan di MT5 Elev8 (best-effort)
-                            val currentCandleJson = runCatching {
-                                val curReq = Request.Builder()
-                                    .url(currentUrl)
-                                    .header("auth-token", authToken)
-                                    .header("Accept", "application/json")
-                                    .build()
-                                okHttpClient.newCall(curReq).execute().use { curResp ->
-                                    if (curResp.isSuccessful) curResp.body?.string() else null
+                            if (code in 200..299 && bodyStr.isNotBlank()) {
+                                discoveredMetaApiRegion = region
+                                discoveredElev8Symbol[symbol] = rawSym
+
+                                // Ambil juga current-candle [0] yang sedang berjalan di MT5 Elev8 (best-effort)
+                                val currentCandleJson = runCatching {
+                                    val curReq = Request.Builder()
+                                        .url(currentUrl)
+                                        .header("auth-token", authToken)
+                                        .header("Accept", "application/json")
+                                        .build()
+                                    okHttpClient.newCall(curReq).execute().use { curResp ->
+                                        if (curResp.isSuccessful) curResp.body?.string() else null
+                                    }
+                                }.getOrNull()
+
+                                val parsedBars = parseMetaApiCandlesJson(bodyStr, currentCandleJson, symbol, timeframe)
+                                if (parsedBars.size >= 30) {
+                                    return@withPermit RatesFetchOutcome.Success(
+                                        bars = parsedBars,
+                                        provider = OnlineDataProvider.ELEV8_METAAPI,
+                                        endpointUrl = histUrl,
+                                        httpStatusCode = code,
+                                        serverFetchTimestampMs = fetchTimeMs,
+                                        latestBarTimestampSec = parsedBars.first().timeEpochSec
+                                    )
+                                } else {
+                                    lastErrorMsg = "Server MT5 Elev8 ($region) hanya mengembalikan ${parsedBars.size} candle untuk $rawSym."
                                 }
-                            }.getOrNull()
-
-                            val parsedBars = parseMetaApiCandlesJson(bodyStr, currentCandleJson, symbol, timeframe)
-                            if (parsedBars.size >= 30) {
-                                return@withPermit RatesFetchOutcome.Success(
-                                    bars = parsedBars,
-                                    provider = OnlineDataProvider.ELEV8_METAAPI,
-                                    endpointUrl = histUrl,
-                                    httpStatusCode = code,
-                                    serverFetchTimestampMs = fetchTimeMs,
-                                    latestBarTimestampSec = parsedBars.first().timeEpochSec
-                                )
                             } else {
-                                lastErrorMsg = "Server MT5 Elev8 ($region) hanya mengembalikan ${parsedBars.size} candle untuk $rawSym."
-                            }
-                        } else {
-                            val snippet = bodyStr.take(180)
-                            lastErrorMsg = when (code) {
-                                401 -> "OFFLINE (HTTP 401) — Token MetaApi tidak valid atau kedaluwarsa. Periksa METAAPI_AUTH_TOKEN di panel Secrets."
-                                402, 403, 429 -> "OFFLINE (HTTP $code) — Kuota Gratis 17 Hari / Kredit CPU MetaApi Habis. Silakan Top-Up saldo di https://app.metaapi.cloud agar server MT5 Elev8 kembali Online."
-                                404 -> "OFFLINE (HTTP 404) — Akun MT5 Elev8 sedang Undeployed, simbol '$rawSym' tidak ditemukan, atau berbeda region ($region). Pastikan akun berstatus DEPLOYED & CONNECTED di app.metaapi.cloud."
-                                else -> "OFFLINE (HTTP $code) dari Elev8 MT5 ($region): $snippet"
-                            }
-                            if (code == 401 || code == 402 || code == 429) {
-                                break
+                                val snippet = bodyStr.take(180)
+                                lastErrorMsg = when (code) {
+                                    401 -> "OFFLINE (HTTP 401) — Token MetaApi tidak valid atau kedaluwarsa. Periksa token di akun app.metaapi.cloud."
+                                    402, 403, 429 -> "OFFLINE (HTTP $code) — Kuota Gratis 17 Hari / Kredit CPU MetaApi Habis. Silakan Top-Up saldo di https://app.metaapi.cloud agar server MT5 Elev8 kembali Online."
+                                    404 -> "OFFLINE (HTTP 404) — Akun MT5 Elev8 berstatus UNDEPLOYED di app.metaapi.cloud atau simbol '$rawSym' tidak ditemukan. Pastikan akun berstatus DEPLOYED & CONNECTED."
+                                    else -> "OFFLINE (HTTP $code) dari Elev8 MT5 ($region): $snippet"
+                                }
+                                if (code == 401 || code == 402 || code == 429) {
+                                    break
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        lastErrorMsg = "${e.javaClass.simpleName}: ${e.localizedMessage ?: "Gagal menghubungi server MetaApi ($region)"}"
                     }
-                } catch (e: Exception) {
-                    lastErrorMsg = "${e.javaClass.simpleName}: ${e.localizedMessage ?: "Gagal menghubungi server MetaApi ($region)"}"
+                    if (lastHttpCode == 401 || lastHttpCode == 402 || lastHttpCode == 429) {
+                        break
+                    }
                 }
                 if (lastHttpCode == 401 || lastHttpCode == 402 || lastHttpCode == 429) {
                     break

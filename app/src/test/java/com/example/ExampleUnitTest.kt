@@ -135,4 +135,14 @@ class ExampleUnitTest {
         assertTrue("Tumpang tindih timestamp wajib terdeteksi", !isValidOverlap)
         assertTrue(overlapNotes.any { it.contains("Urutan waktu terbalik/tumpang tindih") })
     }
+
+    @Test
+    fun gitHubReleaseUpdaterAndMetaApiGuard_validateInputsHonestAndSafe() = kotlinx.coroutines.runBlocking {
+        val service = com.example.data.remote.LiveMarketAndNewsService()
+        val ghEmpty = service.checkLatestGitHubRelease("YOUR_GITHUB_USER/YOUR_REPO_NAME")
+        assertEquals(false, ghEmpty.isUpdateAvailable)
+        assertTrue(ghEmpty.statusMessage.contains("username/nama-repo"))
+        assertTrue(service.getInstalledReleaseTag().startsWith("v1."))
+    }
 }
+

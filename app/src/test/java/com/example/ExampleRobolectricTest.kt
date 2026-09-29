@@ -110,4 +110,27 @@ class ExampleRobolectricTest {
         val offlineNews = service.fetchLiveMacroNews(isOfflineTestMode = true)
         assertTrue("Berita harus jujur mengembalikan Error saat offline", offlineNews is LiveMarketAndNewsService.NewsFetchOutcome.Error)
     }
+
+    @Test
+    fun diagnoseMetaApiLiveConnection() = runBlocking {
+        val service = LiveMarketAndNewsService()
+        val client = okhttp3.OkHttpClient()
+        val accId = BuildConfig.METAAPI_ACCOUNT_ID
+        val token = BuildConfig.METAAPI_AUTH_TOKEN
+        val provReq = okhttp3.Request.Builder()
+            .url("https://mt-provisioning-api-v1.agiliumtrade.ai/users/current/accounts/$accId")
+            .header("auth-token", token)
+            .build()
+        client.newCall(provReq).execute().use { resp ->
+            println("METAAPI_PROV_STATUS=${resp.code}")
+            println("METAAPI_PROV_BODY=${resp.body?.string()}")
+        }
+        val outcome = service.fetchSymbolRates(
+            symbol = MarketSymbol.XAUUSD,
+            timeframe = Timeframe.M15,
+            provider = OnlineDataProvider.ELEV8_METAAPI
+        )
+        println("METAAPI_OUTCOME=$outcome")
+    }
 }
+

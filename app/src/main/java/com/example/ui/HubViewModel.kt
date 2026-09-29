@@ -69,6 +69,8 @@ data class HubUiState(
     val diagnostics: SystemDiagnosticReport = SystemDiagnosticReport(),
     val liveAudit: LiveVerificationAudit = LiveVerificationAudit(),
     val githubRelease: GitHubReleaseInfo = GitHubReleaseInfo(),
+    val metaApiAccountIdInput: String = "",
+    val metaApiAuthTokenInput: String = "",
     val statusBannerMessage: String? = null
 )
 
@@ -86,7 +88,9 @@ class HubViewModel(
             githubRelease = GitHubReleaseInfo(
                 repository = repository.getDefaultGitHubRepository(),
                 installedTag = repository.getInstalledReleaseTag()
-            )
+            ),
+            metaApiAccountIdInput = repository.getMetaApiAccountId(),
+            metaApiAuthTokenInput = repository.getMetaApiAuthToken()
         )
     )
     val uiState: StateFlow<HubUiState> = _uiState.asStateFlow()
@@ -811,6 +815,32 @@ class HubViewModel(
                 githubRelease = state.githubRelease.copy(repository = repo)
             )
         }
+    }
+
+    fun updateMetaApiAccountIdInput(accId: String) {
+        _uiState.update { it.copy(metaApiAccountIdInput = accId) }
+    }
+
+    fun updateMetaApiAuthTokenInput(token: String) {
+        _uiState.update { it.copy(metaApiAuthTokenInput = token) }
+    }
+
+    fun saveAndConnectMetaApiCredentials() {
+        val state = _uiState.value
+        val accId = state.metaApiAccountIdInput.trim()
+        val token = state.metaApiAuthTokenInput.trim()
+        if (accId.isBlank() || token.isBlank()) {
+            _uiState.update { it.copy(statusBannerMessage = "Account ID dan Token MetaApi tidak boleh kosong!") }
+            return
+        }
+        repository.setCustomMetaApiCredentials(accId, token)
+        _uiState.update {
+            it.copy(
+                selectedProvider = OnlineDataProvider.ELEV8_METAAPI,
+                statusBannerMessage = "Kredensial Elev8 MT5 disimpan. Menghubungkan ke MetaApi Cloud..."
+            )
+        }
+        refreshMarketData(forceRefreshNews = false)
     }
 
     fun checkGitHubReleaseUpdate() {

@@ -37,6 +37,14 @@ class HubRepository(
 
     fun isMetaApiConfigured(): Boolean = remoteService.isMetaApiConfigured()
 
+    fun getMetaApiAccountId(): String = remoteService.getMetaApiAccountId()
+
+    fun getMetaApiAuthToken(): String = remoteService.getMetaApiAuthToken()
+
+    fun setCustomMetaApiCredentials(accountId: String, token: String, region: String? = null) {
+        remoteService.setCustomMetaApiCredentials(accountId, token, region)
+    }
+
     fun getDefaultGitHubRepository(): String = remoteService.getDefaultGitHubRepository()
 
     fun getInstalledReleaseTag(): String = remoteService.getInstalledReleaseTag()

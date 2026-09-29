@@ -42,6 +42,7 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -223,6 +224,11 @@ fun HubSmartPatternApp() {
                         endpointUrl = uiState.liveAudit.lastEndpointUrl,
                         errorMessage = uiState.connectionErrorMessage
                             ?: "Provider tidak dapat dijangkau atau mengembalikan respons kosong.",
+                        metaApiAccountId = uiState.metaApiAccountIdInput,
+                        metaApiAuthToken = uiState.metaApiAuthTokenInput,
+                        onUpdateAccountId = viewModel::updateMetaApiAccountIdInput,
+                        onUpdateAuthToken = viewModel::updateMetaApiAuthTokenInput,
+                        onSaveMetaApi = viewModel::saveAndConnectMetaApiCredentials,
                         onRetry = { viewModel.refreshMarketData(forceRefreshNews = true) },
                         onSwitchProvider = viewModel::selectProvider
                     )
@@ -290,13 +296,18 @@ private fun HonestOfflineErrorState(
     provider: OnlineDataProvider,
     endpointUrl: String,
     errorMessage: String,
+    metaApiAccountId: String,
+    metaApiAuthToken: String,
+    onUpdateAccountId: (String) -> Unit,
+    onUpdateAuthToken: (String) -> Unit,
+    onSaveMetaApi: () -> Unit,
     onRetry: () -> Unit,
     onSwitchProvider: (OnlineDataProvider) -> Unit
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(18.dp)
+            .padding(14.dp)
             .testTag("honest_offline_error_screen"),
         contentAlignment = Alignment.Center
     ) {
@@ -308,7 +319,7 @@ private fun HonestOfflineErrorState(
                 .border(1.5.dp, BearishCrimson, RoundedCornerShape(18.dp))
         ) {
             Column(
-                modifier = Modifier.padding(18.dp),
+                modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -316,17 +327,17 @@ private fun HonestOfflineErrorState(
                     imageVector = Icons.Default.CloudOff,
                     contentDescription = "Provider Offline",
                     tint = BearishCrimson,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(42.dp)
                 )
                 Text(
-                    text = "STATUS: PROVIDER OFFLINE / GAGAL TERHUBUNG",
+                    text = "STATUS: ${provider.shortLabel.uppercase()} OFFLINE",
                     style = MaterialTheme.typography.titleMedium,
                     color = BearishCrimson,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "Aplikasi tetap jujur: TIDAK menampilkan grafik/data simulasi lokal ketika sumber online (${provider.displayName}) tidak dapat diakses.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "Aplikasi beroperasi jujur (0% data palsu). Data pasar hanya ditampilkan jika server online aktif.",
+                    style = MaterialTheme.typography.bodySmall,
                     color = TextPrimary
                 )
                 Box(
@@ -350,9 +361,64 @@ private fun HonestOfflineErrorState(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                // Kotak Input Kredensial Langsung jika Provider adalah Elev8 MT5
+                if (provider == OnlineDataProvider.ELEV8_METAAPI) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = ObsidianBg),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, GoldPrimary.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "KREDENSIAL AKUN ELEV8 MT5 (METAAPI)",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            OutlinedTextField(
+                                value = metaApiAccountId,
+                                onValueChange = onUpdateAccountId,
+                                label = { Text("Account ID MetaApi", style = MaterialTheme.typography.labelSmall) },
+                                placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("offline_account_id_input")
+                            )
+                            OutlinedTextField(
+                                value = metaApiAuthToken,
+                                onValueChange = onUpdateAuthToken,
+                                label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
+                                placeholder = { Text("eyJhbGciOiJSUzUxMiIs...", style = MaterialTheme.typography.labelSmall) },
+                                singleLine = true,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("offline_auth_token_input")
+                            )
+                            Button(
+                                onClick = onSaveMetaApi,
+                                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("save_connect_metaapi_button")
+                            ) {
+                                Text(
+                                    text = "SIMPAN & SAMBUNGKAN KE ELEV8 MT5",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+                }
+
                 Text(
-                    text = "Pilih Sumber Server Online Aktif atau Coba Lagi:",
+                    text = "Atau Beralih ke Server Publik Gratis (Tanpa Akun):",
                     style = MaterialTheme.typography.labelMedium,
                     color = CyanSecondary
                 )
@@ -371,7 +437,7 @@ private fun HonestOfflineErrorState(
                             Text(
                                 text = realProv.shortLabel,
                                 style = MaterialTheme.typography.labelSmall,
-                                color = CyanSecondary
+                                color = if (realProv == provider) GoldBright else CyanSecondary
                             )
                         }
                     }
@@ -379,18 +445,19 @@ private fun HonestOfflineErrorState(
 
                 Button(
                     onClick = onRetry,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = GoldPrimary,
-                        contentColor = ObsidianBg
-                    ),
+                    colors = ButtonDefaults.buttonColors(containerColor = CyanSecondary, contentColor = ObsidianBg),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
-                        .testTag("retry_online_connection_button")
+                        .testTag("retry_online_button")
                 ) {
-                    Text("Coba Hubungkan Ulang ke ${provider.shortLabel}", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        text = "COBA HUBUNGKAN ULANG",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
     }
 }
+
