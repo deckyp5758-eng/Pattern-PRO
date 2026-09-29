@@ -32,20 +32,30 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 3. Setup Android SDK & Accept Licenses
-        uses: android-actions/setup-android@v3
-
-      - name: 4. Accept Android SDK Licenses & Prepare SDK
+      - name: 3. Konfigurasi Android SDK & Terima Lisensi Resmi
         run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "build-tools;35.0.0" || true
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sudo mkdir -p "${SDK_DIR}/licenses" || mkdir -p "${SDK_DIR}/licenses"
+          sudo chown -R "$(id -u):$(id -g)" "${SDK_DIR}" || true
+          echo "ANDROID_HOME=${SDK_DIR}" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> $GITHUB_ENV
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${SDK_DIR}/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "${SDK_DIR}/licenses/android-sdk-preview-license"
+          SDKMANAGER_BIN="${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "${SDKMANAGER_BIN}" ]; then
+            SDKMANAGER_BIN="$(command -v sdkmanager || true)"
+          fi
+          if [ -n "${SDKMANAGER_BIN}" ] && [ -x "${SDKMANAGER_BIN}" ]; then
+            yes | "${SDKMANAGER_BIN}" --sdk_root="${SDK_DIR}" --licenses > /dev/null 2>&1 || true
+          fi
+          echo "Android SDK siap digunakan di: ${SDK_DIR}"
 
-      - name: 5. Setup Gradle 9.3.1
+      - name: 4. Setup Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
-      - name: 6. Restore Signing Keystore (Agar APK Bisa Meng-update Aplikasi Lama Tanpa Konflik)
+      - name: 5. Restore Signing Keystore (Agar APK Bisa Meng-update Aplikasi Lama Tanpa Konflik)
         run: |
           if [ -f "debug.keystore.base64" ]; then
             base64 -d debug.keystore.base64 > debug.keystore
@@ -54,7 +64,7 @@ jobs:
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: 7. Buat File .env dari GitHub Secrets & Metadata Release
+      - name: 6. Buat File .env dari GitHub Secrets & Metadata Release
         env:
           SECRET_METAAPI_ACCOUNT_ID: ${{ secrets.METAAPI_ACCOUNT_ID }}
           SECRET_METAAPI_AUTH_TOKEN: ${{ secrets.METAAPI_AUTH_TOKEN }}
@@ -64,43 +74,45 @@ jobs:
           ACC_ID="${SECRET_METAAPI_ACCOUNT_ID:-YOUR_METAAPI_ACCOUNT_ID}"
           TOKEN="${SECRET_METAAPI_AUTH_TOKEN:-YOUR_METAAPI_AUTH_TOKEN}"
           VERSION_TAG="v1.0.${RUN_NUM}"
-          cat <<EOF > .env
-          METAAPI_ACCOUNT_ID=${ACC_ID}
-          METAAPI_AUTH_TOKEN=${TOKEN}
-          GITHUB_REPOSITORY=${CURRENT_REPO}
-          APP_RELEASE_TAG=${VERSION_TAG}
-          EOF
+          {
+            echo "METAAPI_ACCOUNT_ID=${ACC_ID}"
+            echo "METAAPI_AUTH_TOKEN=${TOKEN}"
+            echo "GITHUB_REPOSITORY=${CURRENT_REPO}"
+            echo "APP_RELEASE_TAG=${VERSION_TAG}"
+          } > .env
           echo "File .env berhasil disiapkan untuk BuildConfig (${CURRENT_REPO} @ ${VERSION_TAG})."
 
-      - name: 8. Build APK (assembleDebug dengan Keystore Tetap & VersionCode Otomatis)
+      - name: 7. Build APK Debug (assembleDebug dengan Keystore Tetap & VersionCode Otomatis)
         run: |
           if [ -f "./gradlew" ]; then
             chmod +x ./gradlew
-            ./gradlew :app:assembleDebug --no-daemon
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
           else
-            gradle :app:assembleDebug --no-daemon
+            gradle :app:assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: 9. Siapkan Nama File APK Versi Terbaru
+      - name: 8. Siapkan File APK Debug & Versi Release
         id: prepare_apk
         run: |
           VERSION_TAG="v1.0.${{ github.run_number }}"
           APK_NAME="HUB-Smart-Pattern-Engine-Pro-${VERSION_TAG}.apk"
           cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
           cp app/build/outputs/apk/debug/app-debug.apk "HUB-Smart-Pattern-Engine-Pro-latest.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "app-debug.apk"
           echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
 
-      - name: 10. Upload APK ke GitHub Actions Artifacts
+      - name: 9. Upload APK Debug ke GitHub Actions Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.prepare_apk.outputs.apk_name }}
+          name: APK-Debug-${{ steps.prepare_apk.outputs.version_tag }}
           path: |
+            app-debug.apk
             ${{ steps.prepare_apk.outputs.apk_name }}
             HUB-Smart-Pattern-Engine-Pro-latest.apk
           if-no-files-found: error
 
-      - name: 11. Publish Otomatis ke GitHub Releases
+      - name: 10. Publish Otomatis ke GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.prepare_apk.outputs.version_tag }}
@@ -108,13 +120,13 @@ jobs:
           body: |
             ### Pembaruan Otomatis APK (${{ steps.prepare_apk.outputs.version_tag }})
             - **Commit**: `${{ github.sha }}`
-            - **Waktu Build**: `${{ github.event.head_commit.timestamp || github.run_id }}`
-            - **Catatan**: ${{ github.event.inputs.release_notes || github.event.head_commit.message || 'Release otomatis setelah push ke GitHub.' }}
+            - **Catatan**: ${{ github.event.inputs.release_notes || 'Release otomatis setelah push ke GitHub.' }}
 
-            #### Cara Update di HP Android Anda:
-            1. Unduh file **`${{ steps.prepare_apk.outputs.apk_name }}`** atau **`HUB-Smart-Pattern-Engine-Pro-latest.apk`** di bawah ini.
-            2. Buka file APK tersebut untuk langsung meng-update aplikasi tanpa perlu menghapus aplikasi lama (karena tanda tangan `debug.keystore` sama persis).
+            #### Cara Install / Update di HP Android Anda:
+            1. Unduh file **`${{ steps.prepare_apk.outputs.apk_name }}`** atau **`HUB-Smart-Pattern-Engine-Pro-latest.apk`** atau **`app-debug.apk`** di bawah ini.
+            2. Buka file APK tersebut untuk langsung meng-update aplikasi tanpa perlu menghapus aplikasi lama.
           files: |
+            app-debug.apk
             ${{ steps.prepare_apk.outputs.apk_name }}
             HUB-Smart-Pattern-Engine-Pro-latest.apk
           draft: false
