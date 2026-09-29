@@ -1,0 +1,6 @@
+{
+  "name": "HUB Pattern Engine",
+  "description": "MT5 Non-Repaint Closed-Candle Quantitative Market Structure, Candlestick Pattern, Multi-Timeframe & Live Macro News Engine for XAUUSD and EURUSD.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

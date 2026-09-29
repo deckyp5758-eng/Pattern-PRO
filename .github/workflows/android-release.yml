@@ -1,0 +1,124 @@
+name: Build & Release Android APK
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: 'Catatan Rilis Update APK (Opsional)'
+        required: false
+        default: 'Pembaruan otomatis HUB Smart Pattern Engine Pro (Elev8 MT5 & 10 Mesin Konfluensi).'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release-apk:
+    name: Build Signed APK & Publish GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 3. Setup Android SDK & Accept Licenses
+        uses: android-actions/setup-android@v3
+
+      - name: 4. Accept Android SDK Licenses & Prepare SDK
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "build-tools;35.0.0" || true
+
+      - name: 5. Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: 6. Restore Signing Keystore (Agar APK Bisa Meng-update Aplikasi Lama Tanpa Konflik)
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+            echo "debug.keystore berhasil dipulihkan dari debug.keystore.base64"
+          elif [ ! -f "debug.keystore" ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: 7. Buat File .env dari GitHub Secrets & Metadata Release
+        env:
+          SECRET_METAAPI_ACCOUNT_ID: ${{ secrets.METAAPI_ACCOUNT_ID }}
+          SECRET_METAAPI_AUTH_TOKEN: ${{ secrets.METAAPI_AUTH_TOKEN }}
+          CURRENT_REPO: ${{ github.repository }}
+          RUN_NUM: ${{ github.run_number }}
+        run: |
+          ACC_ID="${SECRET_METAAPI_ACCOUNT_ID:-YOUR_METAAPI_ACCOUNT_ID}"
+          TOKEN="${SECRET_METAAPI_AUTH_TOKEN:-YOUR_METAAPI_AUTH_TOKEN}"
+          VERSION_TAG="v1.0.${RUN_NUM}"
+          cat <<EOF > .env
+          METAAPI_ACCOUNT_ID=${ACC_ID}
+          METAAPI_AUTH_TOKEN=${TOKEN}
+          GITHUB_REPOSITORY=${CURRENT_REPO}
+          APP_RELEASE_TAG=${VERSION_TAG}
+          EOF
+          echo "File .env berhasil disiapkan untuk BuildConfig (${CURRENT_REPO} @ ${VERSION_TAG})."
+
+      - name: 8. Build APK (assembleDebug dengan Keystore Tetap & VersionCode Otomatis)
+        run: |
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew
+            ./gradlew :app:assembleDebug --no-daemon
+          else
+            gradle :app:assembleDebug --no-daemon
+          fi
+
+      - name: 9. Siapkan Nama File APK Versi Terbaru
+        id: prepare_apk
+        run: |
+          VERSION_TAG="v1.0.${{ github.run_number }}"
+          APK_NAME="HUB-Smart-Pattern-Engine-Pro-${VERSION_TAG}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
+          cp app/build/outputs/apk/debug/app-debug.apk "HUB-Smart-Pattern-Engine-Pro-latest.apk"
+          echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+          echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
+
+      - name: 10. Upload APK ke GitHub Actions Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.prepare_apk.outputs.apk_name }}
+          path: |
+            ${{ steps.prepare_apk.outputs.apk_name }}
+            HUB-Smart-Pattern-Engine-Pro-latest.apk
+          if-no-files-found: error
+
+      - name: 11. Publish Otomatis ke GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prepare_apk.outputs.version_tag }}
+          name: "Release ${{ steps.prepare_apk.outputs.version_tag }} — HUB Smart Pattern Engine Pro"
+          body: |
+            ### Pembaruan Otomatis APK (${{ steps.prepare_apk.outputs.version_tag }})
+            - **Commit**: `${{ github.sha }}`
+            - **Waktu Build**: `${{ github.event.head_commit.timestamp || github.run_id }}`
+            - **Catatan**: ${{ github.event.inputs.release_notes || github.event.head_commit.message || 'Release otomatis setelah push ke GitHub.' }}
+
+            #### Cara Update di HP Android Anda:
+            1. Unduh file **`${{ steps.prepare_apk.outputs.apk_name }}`** atau **`HUB-Smart-Pattern-Engine-Pro-latest.apk`** di bawah ini.
+            2. Buka file APK tersebut untuk langsung meng-update aplikasi tanpa perlu menghapus aplikasi lama (karena tanda tangan `debug.keystore` sama persis).
+          files: |
+            ${{ steps.prepare_apk.outputs.apk_name }}
+            HUB-Smart-Pattern-Engine-Pro-latest.apk
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

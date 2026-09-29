@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">HUB Pattern Engine</string>
+    <string name="subtitle_engine">Indikator Analitik MT5 • Non-Repaint Candle Tutup [1]</string>
+    <string name="tab_terminal">Grafik HUD</string>
+    <string name="tab_engines">10 Mesin</string>
+    <string name="tab_mtf">Matriks MTF</string>
+    <string name="tab_news">Berita</string>
+    <string name="tab_mql5">Kode MQL5</string>
+    <string name="badge_non_repaint">NON-REPAINT • HANYA CANDLE TUTUP [INDEKS 1]</string>
+    <string name="badge_candle0_monitor">CANDLE [0] SEDANG BERJALAN (MONITOR SAJA)</string>
+    <string name="cd_refresh_market">Perbarui data pasar dan berita terbaru</string>
+    <string name="cd_save_snapshot">Simpan sinyal candle tutup ke catatan riwayat</string>
+    <string name="cd_copy_mql5">Salin seluruh kode indikator MQL5</string>
+    <string name="cd_share_mql5">Bagikan atau ekspor file indikator .mq5</string>
+</resources>
