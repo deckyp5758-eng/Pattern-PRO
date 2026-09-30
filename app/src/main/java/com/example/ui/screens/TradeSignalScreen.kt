@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,7 +52,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.AnalyticalVerdict
 import com.example.model.CompleteHubAnalysis
 import com.example.model.OnlineDataProvider
@@ -382,10 +385,13 @@ fun TradeSignalScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "4 PARAMETER EKSEKUSI (KETUK UNTUK SALIN):",
+                            text = "PARAMETER EKSEKUSI MT5:",
                             style = MaterialTheme.typography.labelMedium,
                             color = TextSecondary,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Surface(
                             color = CyanSecondary.copy(alpha = 0.15f),
@@ -403,7 +409,7 @@ fun TradeSignalScreen(
                                     modifier = Modifier.size(12.dp)
                                 )
                                 Text(
-                                    text = "Salin ke MT5",
+                                    text = "Ketuk untuk Salin",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = CyanSecondary,
                                     fontWeight = FontWeight.Bold
@@ -673,23 +679,26 @@ private fun ExecutionMetricBox(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
 
-    Box(
+    Surface(
+        color = SlateSurfaceElevated,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.2.dp, borderColor.copy(alpha = 0.75f)),
         modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .background(SlateSurfaceElevated)
-            .border(1.2.dp, borderColor.copy(alpha = 0.75f), RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable {
                 clipboardManager.setText(AnnotatedString(value))
                 Toast.makeText(
                     context,
-                    "✓ $title tersalin: $value (Siap di-paste ke MetaTrader 5)",
+                    "✓ $title tersalin ($value)",
                     Toast.LENGTH_SHORT
                 ).show()
             }
             .then(if (testTag.isNotBlank()) Modifier.testTag(testTag) else Modifier)
-            .padding(10.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -699,38 +708,53 @@ private fun ExecutionMetricBox(
                     text = title,
                     style = MaterialTheme.typography.labelSmall,
                     color = borderColor,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
-                Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Salin $title",
-                    tint = borderColor.copy(alpha = 0.85f),
-                    modifier = Modifier.size(13.dp)
-                )
+                Surface(
+                    color = borderColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Salin $title",
+                            tint = borderColor,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            text = "SALIN",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = borderColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
             }
+
             Text(
                 text = value,
                 style = MaterialTheme.typography.titleMedium,
                 color = TextPrimary,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = subText,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary
-                )
-                Text(
-                    text = "Ketuk Salin",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = borderColor,
-                    fontWeight = FontWeight.Medium
-                )
-            }
+
+            Text(
+                text = subText,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

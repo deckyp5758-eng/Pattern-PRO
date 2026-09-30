@@ -49,7 +49,7 @@ class ExampleUnitTest {
         val map = Timeframe.entries.associateWith { bars }
         val analysis = IndicatorAndConfluenceEngines.buildCompleteAnalysis(
             symbol = MarketSymbol.XAUUSD,
-            brokerSuffix = ".sml",
+            brokerSuffix = "",
             activeTimeframe = Timeframe.M15,
             activeBars = bars,
             allTimeframeBars = map,
@@ -59,7 +59,7 @@ class ExampleUnitTest {
             isLiveRss = true
         )
 
-        assertEquals("XAUUSD.sml", analysis.dataEngine.symbolWithSuffix)
+        assertEquals("XAUUSD", analysis.dataEngine.symbolWithSuffix)
         assertTrue(analysis.volumeEngine.isVolumeExpansion)
         assertTrue(analysis.trendEngine.isPerfectBullishStack)
 

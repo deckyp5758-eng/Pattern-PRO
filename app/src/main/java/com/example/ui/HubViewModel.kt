@@ -46,14 +46,15 @@ enum class HubTab(val title: String) {
     ENGINES("Mesin"),
     MTF_MATRIX("Matriks"),
     NEWS_ENGINE("Berita"),
-    MQL5_STUDIO("Kode MQL5")
+    MQL5_STUDIO("Kode MQL5"),
+    SETTINGS("Pengaturan")
 }
 
 data class HubUiState(
     val selectedTab: HubTab = HubTab.HUD_CHART,
     val selectedProvider: OnlineDataProvider = OnlineDataProvider.BINANCE_VISION,
     val selectedSymbol: MarketSymbol = MarketSymbol.XAUUSD,
-    val brokerSuffix: String = ".sml",
+    val brokerSuffix: String = "",
     val selectedTimeframe: Timeframe = Timeframe.M15,
     val isLoading: Boolean = true,
     val isSyncingInProgress: Boolean = false,

@@ -99,26 +99,10 @@ fun Mql5StudioScreen(
                     HorizontalDivider(color = SlateCardBorder)
 
                     Text(
-                        text = "Atur Parameter Input Indikator MQL5:",
+                        text = "Parameter Input Indikator MQL5:",
                         style = MaterialTheme.typography.labelMedium,
                         color = CyanSecondary
                     )
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(".sml", ".pro", ".raw", "").forEach { sfx ->
-                            val label = if (sfx.isEmpty()) "Standar (Tanpa Akhiran)" else "Akhiran: $sfx"
-                            FilterChip(
-                                selected = config.brokerSuffix == sfx,
-                                onClick = { onUpdateConfig(config.copy(brokerSuffix = sfx)) },
-                                label = { Text(label, style = MaterialTheme.typography.labelSmall) }
-                            )
-                        }
-                    }
 
                     Row(
                         modifier = Modifier

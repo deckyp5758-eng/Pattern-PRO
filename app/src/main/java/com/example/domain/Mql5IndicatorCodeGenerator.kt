@@ -3,7 +3,7 @@ package com.example.domain
 import com.example.model.CompleteHubAnalysis
 
 data class Mql5ConfigParams(
-    val brokerSuffix: String = ".sml",
+    val brokerSuffix: String = "",
     val emaFast: Int = 20,
     val emaMid: Int = 50,
     val emaSlow: Int = 200,

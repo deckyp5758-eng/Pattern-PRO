@@ -2,6 +2,8 @@ package com.example.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -27,6 +29,7 @@ import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
@@ -54,17 +57,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.local.SavedSignalSnapshotEntity
 import com.example.model.AnalyticalVerdict
 import com.example.model.CompleteHubAnalysis
 import com.example.model.MarketSymbol
 import com.example.model.OnlineDataProvider
+import com.example.model.SrInteractionType
 import com.example.model.Timeframe
 import com.example.ui.HubUiState
 import com.example.ui.components.InteractiveMt5ChartCanvas
@@ -95,7 +103,6 @@ fun HudTerminalScreen(
     onSelectProvider: (OnlineDataProvider) -> Unit,
     onSelectSymbol: (MarketSymbol) -> Unit,
     onSelectTimeframe: (Timeframe) -> Unit,
-    onSelectSuffix: (String) -> Unit,
     onInspectBar: (Int) -> Unit,
     onToggleEma: () -> Unit,
     onToggleSr: () -> Unit,
@@ -300,7 +307,7 @@ fun HudTerminalScreen(
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
-                                        text = sym.withSuffix(uiState.brokerSuffix),
+                                        text = sym.code,
                                         style = MaterialTheme.typography.labelLarge,
                                         color = if (isSelected) ObsidianBg else TextPrimary
                                     )
@@ -311,35 +318,6 @@ fun HudTerminalScreen(
                                     )
                                 }
                             }
-                        }
-                    }
-
-                    // Akhiran Broker
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Akhiran Broker:",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextSecondary
-                        )
-                        listOf(".sml", ".pro", ".raw", "m", "").forEach { sfx ->
-                            val label = if (sfx.isEmpty()) "Tanpa Akhiran" else sfx
-                            FilterChip(
-                                selected = uiState.brokerSuffix == sfx,
-                                onClick = { onSelectSuffix(sfx) },
-                                label = {
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                },
-                                modifier = Modifier.testTag("suffix_chip_$label")
-                            )
                         }
                     }
 
@@ -687,206 +665,27 @@ fun HudTerminalScreen(
             }
         }
 
-        // 6. KARTU VERIFIKASI 6 PEMERIKSAAN DEPLOYMENT ONLINE
+        // 5B. PENJELASAN ALUR SKENARIO GRAFIK & LEVEL HARGA MT5 (BISA DISALIN)
         item {
+            val sr = analysis.srEngine
+            val vol = analysis.volatilityEngine
+            val bar1Close = analysis.bars.getOrNull(1)?.close ?: analysis.bars.first().close
+            val suppVal = sr.nearestSupport?.centerPrice ?: (bar1Close - vol.atr14 * 1.5)
+            val resVal = sr.nearestResistance?.centerPrice ?: (bar1Close + vol.atr14 * 1.5)
+            val formatSupp = formatPrice(suppVal, digits)
+            val formatRes = formatPrice(resVal, digits)
+            val formatSl = formatPrice(vol.longStopReferencePrice, digits)
+            val formatTp = formatPrice(vol.longTarget1RPrice, digits)
+            val riskDistance = formatPrice(vol.atr14 * 1.5, digits)
+            val rewardDistance = formatPrice(vol.atr14 * 2.25, digits)
+            val patternLabel = analysis.candleEngine.activeClosedPatterns.firstOrNull()?.pattern?.displayName ?: "Netral / Tanpa Pola Khusus"
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(
-                        1.5.dp,
-                        if (audit.isAllSixVerifiedAndLive) BullishEmerald else GoldPrimary,
-                        RoundedCornerShape(16.dp)
-                    )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.VerifiedUser,
-                                contentDescription = null,
-                                tint = if (audit.isAllSixVerifiedAndLive) BullishEmerald else GoldBright,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "AUDIT 6 PEMERIKSAAN KONEKSI ONLINE",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = GoldBright
-                            )
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(
-                                onClick = onCleanAndResetSession,
-                                modifier = Modifier.testTag("clean_reset_session_button")
-                            ) {
-                                Text("Bersihkan Cache", style = MaterialTheme.typography.labelSmall, color = GoldBright)
-                            }
-                            OutlinedButton(
-                                onClick = onRunMultiProviderAudit,
-                                modifier = Modifier.testTag("run_six_point_audit_button")
-                            ) {
-                                Text("Uji 6 Poin", style = MaterialTheme.typography.labelSmall, color = CyanSecondary)
-                            }
-                        }
-                    }
-
-                    Text(
-                        text = "Endpoint Aktif: ${audit.lastEndpointUrl}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = CyanSecondary
-                    )
-
-                    AuditCheckRow("1. Endpoint Dapat Diakses", audit.check1EndpointAccessible, audit.check1Detail)
-                    AuditCheckRow("2. Data Asli dari Server/Provider", audit.check2RealServerData, audit.check2Detail)
-                    AuditCheckRow("3. Timestamp Server Berubah", audit.check3TimestampUpdated, audit.check3Detail)
-                    AuditCheckRow("4. Data Berubah Saat Ganti Sumber", audit.check4ChangesAcrossProviders, audit.check4Detail)
-                    AuditCheckRow("5. Error Koneksi Ditampilkan", audit.check5ErrorDisplayedProperly, audit.check5Detail)
-                    AuditCheckRow("6. Jujur Ketika Provider Offline", audit.check6HonestWhenOffline, audit.check6Detail)
-                }
-            }
-        }
-
-        // 6B. Panel Pembaruan Aplikasi Otomatis via GitHub Releases (OTA APK Update)
-        item {
-            val gh = uiState.githubRelease
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SlateSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        if (gh.isUpdateAvailable) GoldBright else SlateCardBorder,
-                        RoundedCornerShape(16.dp)
-                    )
-            ) {
-                Column(
-                    modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "UPDATE APK VIA GITHUB RELEASES (CI/CD)",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = GoldBright
-                            )
-                            Text(
-                                text = "Versi Terpasang: ${gh.installedTag}" +
-                                    if (gh.latestTag.isNotBlank()) " • Rilis GitHub Terbaru: ${gh.latestTag}" else "",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (gh.isUpdateAvailable) BullishEmerald else TextSecondary
-                            )
-                        }
-                        OutlinedButton(
-                            onClick = onCheckGitHubUpdate,
-                            enabled = !gh.isChecking,
-                            modifier = Modifier.testTag("check_github_update_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Refresh,
-                                contentDescription = "Cek Update GitHub",
-                                tint = CyanSecondary,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (gh.isChecking) "Mengecek..." else "Cek Update",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CyanSecondary
-                            )
-                        }
-                    }
-
-                    OutlinedTextField(
-                        value = gh.repository,
-                        onValueChange = onUpdateGitHubRepo,
-                        label = {
-                            Text(
-                                text = "Repositori GitHub (username/nama-repo)",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
-                        placeholder = {
-                            Text(
-                                text = "Contoh: username/hub-smart-pattern-pro",
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("github_repo_input")
-                    )
-
-                    Text(
-                        text = gh.statusMessage,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (gh.isUpdateAvailable) BullishEmerald else TextSecondary
-                    )
-
-                    if (gh.apkDownloadUrl.isNotBlank()) {
-                        Button(
-                            onClick = {
-                                runCatching {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(gh.apkDownloadUrl))
-                                    context.startActivity(intent)
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (gh.isUpdateAvailable) BullishEmerald else GoldPrimary,
-                                contentColor = ObsidianBg
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("download_github_apk_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CloudDone,
-                                contentDescription = "Unduh APK Terbaru",
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "UNDUH & UPDATE APK (${gh.apkFileName.ifEmpty { gh.latestTag }})" +
-                                    if (gh.apkSizeMb > 0.0) " • ${gh.apkSizeMb} MB" else "",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // 6C. Konfigurasi Kredensial Elev8 MT5 (MetaApi) - Disimpan Permanen di Perangkat
-        item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = SlateSurface),
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        1.dp,
-                        if (uiState.selectedProvider == OnlineDataProvider.ELEV8_METAAPI) GoldPrimary else SlateCardBorder,
-                        RoundedCornerShape(16.dp)
-                    )
+                    .border(1.dp, GoldPrimary.copy(alpha = 0.8f), RoundedCornerShape(16.dp))
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
@@ -897,91 +696,135 @@ fun HudTerminalScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = null,
-                                tint = GoldBright,
-                                modifier = Modifier.size(18.dp)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "ANALISIS SKENARIO GRAFIK & LEVEL MT5",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "KREDENSIAL ELEV8 MT5 (DISIMPAN PERMANEN)",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = GoldBright
+                                text = "Penjelasan Arah, Toleransi Risiko, & Level Kunci yang Bisa Disalin",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
                             )
                         }
-                        if (uiState.hasCustomSavedCredentials) {
+                        Surface(
+                            color = CyanSecondary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
                             Text(
-                                text = "TERSIMPAN DI HP",
+                                text = "SIAP LUKIS MT5",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = BullishEmerald,
+                                color = CyanSecondary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = SlateCardBorder)
+
+                    // Narasi Skenario Arah Pergerakan
+                    val scenarioText = when (sr.closedBar1Interaction) {
+                        SrInteractionType.SUPPORT_HOLD, SrInteractionType.BULLISH_REJECTION ->
+                            "📍 CANDLE MENYENTUH AREA SUPPORT ($formatSupp):\n" +
+                            "• Skenario Utama: Berpotensi PANTULAN NAIK (Rebound Bullish) menuju Resistance ($formatRes).\n" +
+                            "• Skenario Alternatif: Jika penutupan candle di bawah $formatSupp (Breakdown), harga berpotensi meluncur ke Support bawah berikutnya."
+                        SrInteractionType.RESISTANCE_HOLD, SrInteractionType.BEARISH_REJECTION ->
+                            "📍 CANDLE MENYENTUH AREA RESISTANCE ($formatRes):\n" +
+                            "• Skenario Utama: Berpotensi PENOLAKAN TURUN (Rejection Bearish) menuju Support ($formatSupp).\n" +
+                            "• Skenario Alternatif: Jika penutupan candle di atas $formatRes (Breakout), harga berpotensi melanjutkan kenaikan."
+                        else ->
+                            "📍 HARGA DIPERDAGANGKAN DI ANTARA SUPPORT & RESISTANCE:\n" +
+                            "• Rentang Pergerakan: Antara Support $formatSupp hingga Resistance $formatRes.\n" +
+                            "• Status Pola: $patternLabel. Menunggu reaksi pada salah satu level."
+                    }
+
+                    Surface(
+                        color = SlateSurfaceElevated,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, SlateCardBorder, RoundedCornerShape(10.dp))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "🔮 PROYEKSI ARAH GRAFIK:",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = CyanSecondary,
                                 fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = scenarioText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "• Estimasi Risiko (Distance SL): $riskDistance point/pip ($${formatPrice(vol.atr14 * 1.5, digits)}).\n" +
+                                    "• Proyeksi Target (Reward 1.5R): $rewardDistance point/pip ($${formatPrice(vol.atr14 * 2.25, digits)}).\n" +
+                                    "• Rasio Risk-to-Reward: 1 : 1.5 (Sangat Sehat).\n" +
+                                    "• Struktur Pasar (HH/HL/LH/LL): ${analysis.structureEngine.classification.label}.\n" +
+                                    "• Ayunan Terakhir: ${analysis.structureEngine.confirmedSwings.firstOrNull()?.let { "${it.label.shortCode} (${it.label.fullName}) di ${formatPrice(it.price, digits)}" } ?: "Menunggu titik swing baru"}.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
                             )
                         }
                     }
 
                     Text(
-                        text = "Kredensial Anda disimpan langsung ke penyimpanan internal privat HP (SharedPreferences). Data tetap aman tersimpan saat aplikasi ditutup atau HP di-restart tanpa perlu re-build APK.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
+                        text = "LEVEL HARGA MT5 (KETUK BADGE UNTUK SALIN):",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        fontWeight = FontWeight.Bold
                     )
 
-                    OutlinedTextField(
-                        value = uiState.metaApiAccountIdInput,
-                        onValueChange = onUpdateMetaApiAccountId,
-                        label = { Text("Account ID MetaApi (Elev8)", style = MaterialTheme.typography.labelSmall) },
-                        placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("terminal_metaapi_account_id_input")
-                    )
-
-                    OutlinedTextField(
-                        value = uiState.metaApiAuthTokenInput,
-                        onValueChange = onUpdateMetaApiAuthToken,
-                        label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
-                        placeholder = { Text("Token dari app.metaapi.cloud/token", style = MaterialTheme.typography.labelSmall) },
-                        singleLine = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("terminal_metaapi_auth_token_input")
-                    )
+                    // Grid 4 Level MT5 dengan Tombol Salin
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        LevelCopyBox(
+                            title = "SUPPORT (S1)",
+                            value = formatSupp,
+                            subText = "Batas Pantulan Bawah",
+                            borderColor = BullishEmerald,
+                            testTag = "chart_copy_support",
+                            modifier = Modifier.weight(1f)
+                        )
+                        LevelCopyBox(
+                            title = "RESISTANCE (R1)",
+                            value = formatRes,
+                            subText = "Batas Penolakan Atas",
+                            borderColor = BearishCrimson,
+                            testTag = "chart_copy_resistance",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = onSaveMetaApiCredentials,
-                            colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("terminal_save_metaapi_button")
-                        ) {
-                            Text(
-                                text = "SIMPAN & SAMBUNGKAN",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        if (uiState.hasCustomSavedCredentials || uiState.metaApiAccountIdInput.isNotBlank()) {
-                            OutlinedButton(
-                                onClick = onClearMetaApiCredentials,
-                                modifier = Modifier.testTag("terminal_clear_metaapi_button")
-                            ) {
-                                Text(
-                                    text = "Hapus",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = BearishCrimson
-                                )
-                            }
-                        }
+                        LevelCopyBox(
+                            title = "STOP LOSS (SL)",
+                            value = formatSl,
+                            subText = "Toleransi $riskDistance pt",
+                            borderColor = NeutralAmber,
+                            testTag = "chart_copy_sl",
+                            modifier = Modifier.weight(1f)
+                        )
+                        LevelCopyBox(
+                            title = "TARGET PROFIT (TP)",
+                            value = formatTp,
+                            subText = "Target $rewardDistance pt",
+                            borderColor = CyanSecondary,
+                            testTag = "chart_copy_tp",
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
@@ -1061,6 +904,56 @@ fun HudTerminalScreen(
                         MetricMiniCol("BATAS STOP BUY", formatPrice(vol.longStopReferencePrice, digits))
                         MetricMiniCol("TARGET BUY (1.5R)", formatPrice(vol.longTarget1RPrice, digits))
                         MetricMiniCol("BATAS STOP SELL", formatPrice(vol.shortStopReferencePrice, digits))
+                    }
+
+                    HorizontalDivider(color = SlateCardBorder)
+
+                    // KETERANGAN PANDUAN CARA BACA ANATOMI & ATR(14)
+                    val bodyRatioPct = (inspectedBar.bodyToRangeRatio * 100).toInt()
+                    val candleDominanceNote = when {
+                        inspectedBar.isBullish && bodyRatioPct >= 50 ->
+                            "🟢 DOMINASI PEMBELI KUAT: Bodi $bodyRatioPct% (Bullish Momentum). Harga tutup dekat puncaknya."
+                        inspectedBar.isBullish ->
+                            "🟢 BULLISH PENOLAKAN/KOREKSI: Bodi $bodyRatioPct% dengan ekor bawah/atas signifikan. Terdapat perlawanan."
+                        inspectedBar.isBearish && bodyRatioPct >= 50 ->
+                            "🔴 DOMINASI PENJUAL KUAT: Bodi $bodyRatioPct% (Bearish Momentum). Harga tutup dekat dasarnya."
+                        inspectedBar.isBearish ->
+                            "🔴 BEARISH PENOLAKAN/KOREKSI: Bodi $bodyRatioPct% dengan ekor atas/bawah signifikan."
+                        else ->
+                            "🟡 PASAR DOJI/KONSOLIDASI: Bodi hanya $bodyRatioPct%. Pembeli & penjual seimbang (Ragu-ragu)."
+                    }
+
+                    Surface(
+                        color = SlateSurfaceElevated,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, SlateCardBorder, RoundedCornerShape(10.dp))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "💡 PANDUAN BACA ANATOMI CANDLE & ATR(14):",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = CyanSecondary,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = candleDominanceNote,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "• Jarak Gerak ATR(14): ${formatPrice(vol.atr14, digits)} point/pip (${String.format(Locale.US, "%.2f", vol.atrPercentageOfPrice)}% dari harga).\n" +
+                                    "• Stop Loss Buy Ideal: $${formatPrice(vol.longStopReferencePrice, digits)} (Batas toleransi aman dari ekor keplakan pasar).\n" +
+                                    "• Stop Loss Sell Ideal: $${formatPrice(vol.shortStopReferencePrice, digits)} (Batas toleransi aman jika ambil Sell).\n" +
+                                    "• Target Profit 1.5R: $${formatPrice(vol.longTarget1RPrice, digits)} (Proyeksi 1.5x dari jarak risiko).",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
                     }
                 }
             }
@@ -1196,6 +1089,98 @@ private fun MetricMiniCol(label: String, value: String) {
             style = MaterialTheme.typography.labelLarge,
             color = TextPrimary
         )
+    }
+}
+
+@Composable
+private fun LevelCopyBox(
+    title: String,
+    value: String,
+    subText: String,
+    borderColor: androidx.compose.ui.graphics.Color,
+    testTag: String = "",
+    modifier: Modifier = Modifier
+) {
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
+    Surface(
+        color = SlateSurfaceElevated,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.2.dp, borderColor.copy(alpha = 0.75f)),
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable {
+                clipboardManager.setText(AnnotatedString(value))
+                Toast.makeText(
+                    context,
+                    "✓ $title tersalin: $value (Siap di-paste ke MetaTrader 5)",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .then(if (testTag.isNotBlank()) Modifier.testTag(testTag) else Modifier)
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = borderColor,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                Surface(
+                    color = borderColor.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = "Salin $title",
+                            tint = borderColor,
+                            modifier = Modifier.size(10.dp)
+                        )
+                        Text(
+                            text = "SALIN",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = borderColor,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+
+            Text(
+                text = value,
+                style = MaterialTheme.typography.titleMedium,
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Text(
+                text = subText,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
     }
 }
 

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -74,6 +75,7 @@ import com.example.ui.screens.HudTerminalScreen
 import com.example.ui.screens.Mql5StudioScreen
 import com.example.ui.screens.MtfMatrixScreen
 import com.example.ui.screens.NewsEngineScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TenEnginesScreen
 import com.example.ui.screens.TradeSignalScreen
 import com.example.util.TradeNotificationHelper
@@ -196,6 +198,7 @@ fun HubSmartPatternApp() {
                         HubTab.MTF_MATRIX -> Icons.Default.Layers
                         HubTab.NEWS_ENGINE -> Icons.Default.Newspaper
                         HubTab.MQL5_STUDIO -> Icons.Default.Code
+                        HubTab.SETTINGS -> Icons.Default.Settings
                     }
                     NavigationBarItem(
                         selected = isSelected,
@@ -314,7 +317,6 @@ fun HubSmartPatternApp() {
                             onSelectProvider = viewModel::selectProvider,
                             onSelectSymbol = viewModel::selectSymbol,
                             onSelectTimeframe = viewModel::selectTimeframe,
-                            onSelectSuffix = viewModel::updateBrokerSuffix,
                             onInspectBar = viewModel::inspectCandleBar,
                             onToggleEma = viewModel::toggleEmaOverlays,
                             onToggleSr = viewModel::toggleSrZones,
@@ -360,6 +362,18 @@ fun HubSmartPatternApp() {
                             config = uiState.mql5Config,
                             generatedCode = uiState.generatedMql5Code,
                             onUpdateConfig = viewModel::updateMql5Config
+                        )
+
+                        HubTab.SETTINGS -> SettingsScreen(
+                            uiState = uiState,
+                            onRunMultiProviderAudit = viewModel::runBackgroundMultiProviderAudit,
+                            onCleanAndResetSession = viewModel::cleanAndResetDataSession,
+                            onUpdateGitHubRepo = viewModel::updateGitHubRepoInput,
+                            onCheckGitHubUpdate = viewModel::checkGitHubReleaseUpdate,
+                            onUpdateMetaApiAccountId = viewModel::updateMetaApiAccountIdInput,
+                            onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
+                            onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
+                            onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials
                         )
                     }
                 }
