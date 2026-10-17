@@ -23,6 +23,13 @@ import com.example.model.TrendClassification
 import com.example.model.TrendEngineReport
 import com.example.model.VolatilityEngineReport
 import com.example.model.VolatilityState
+import com.example.model.GlobalMarketSession
+import com.example.model.HtfAlignmentReport
+import com.example.model.HtfAlignmentStatus
+import com.example.model.SmartMoneyReport
+import com.example.model.TradingSessionReport
+import com.example.model.VolatilityBreakoutPoint
+import com.example.model.VolatilityBreakoutProbabilityReport
 import com.example.model.VolumeClassification
 import com.example.model.VolumeEngineReport
 import kotlin.math.abs
@@ -410,6 +417,25 @@ object IndicatorAndConfluenceEngines {
             isLiveRssSynced = isLiveRss
         )
 
+        // 12. SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)
+        val smartMoneyReport = CandleAndStructureEngines.runSmartMoneyEngine(activeBars, volatilityReport.atr14)
+
+        // 13. GLOBAL TRADING SESSION ENGINE
+        val sessionReport = runSessionEngine(bar1.timeEpochSec)
+
+        // 14. HTF TREND ALIGNMENT GUARD
+        val htfAlignmentReport = runHtfAlignmentGuard(activeTimeframe, allTimeframeBars, symbol)
+
+        // 15. HISTORICAL VOLATILITY & BREAKOUT PROBABILITY ZONE
+        val suppPrice = srReport.nearestSupport?.centerPrice ?: (bar1.close - volatilityReport.atr14 * 1.5)
+        val resPrice = srReport.nearestResistance?.centerPrice ?: (bar1.close + volatilityReport.atr14 * 1.5)
+        val breakoutProbReport = computeBreakoutProbability(
+            bars = activeBars,
+            atr14 = volatilityReport.atr14,
+            nearestSupport = suppPrice,
+            nearestResistance = resPrice
+        )
+
         var bullPoints = 0
         var bearPoints = 0
 
@@ -464,6 +490,18 @@ object IndicatorAndConfluenceEngines {
         if (mtfReport.htfBias == PatternBias.BULLISH) bullPoints += 6
         if (mtfReport.htfBias == PatternBias.BEARISH) bearPoints += 6
 
+        // 8. Bobot Smart Money FVG & Order Block (6 poin)
+        if (smartMoneyReport.closedBar1InFvg) {
+            if (bar1.isBullish || smartMoneyReport.nearestBullishFvg != null) bullPoints += 6
+            if (bar1.isBearish || smartMoneyReport.nearestBearishFvg != null) bearPoints += 6
+        }
+
+        // 9. Bobot Keselarasan HTF Trend Alignment Guard (5 poin)
+        if (htfAlignmentReport.status == HtfAlignmentStatus.PERFECT_ALIGNMENT) {
+            if (htfAlignmentReport.htfTrendLabel.contains("Bullish")) bullPoints += 5
+            if (htfAlignmentReport.htfTrendLabel.contains("Bearish")) bearPoints += 5
+        }
+
         val finalBullScore = bullPoints.coerceIn(0, 100)
         val finalBearScore = bearPoints.coerceIn(0, 100)
 
@@ -493,6 +531,12 @@ object IndicatorAndConfluenceEngines {
                 (structureReport.classification != MarketStructureClass.RANGE),
             "Pola Candlestick di Candle Tutup [1] (${candleReport.activeClosedPatterns.firstOrNull()?.pattern?.displayName ?: "Tidak Ada"})" to
                 candleReport.activeClosedPatterns.isNotEmpty(),
+            "Smart Money FVG & Order Block (${smartMoneyReport.activeFvgs.size} gap aktif)" to
+                (smartMoneyReport.activeFvgs.isNotEmpty() || smartMoneyReport.activeOrderBlocks.isNotEmpty()),
+            "Sesi Pasar: ${sessionReport.activeSession.sessionName} (${sessionReport.activeSession.liquidityRating})" to
+                sessionReport.isHighLiquidityWindow,
+            "Keselarasan HTF H1 (${htfAlignmentReport.status.label})" to
+                htfAlignmentReport.status.isAligned,
             "Kekuatan Tren ADX(14) > 25 (${String.format(java.util.Locale.US, "%.1f", momentumReport.adx14)})" to
                 momentumReport.isTrendStrengthConfirmed,
             "Ekspansi Volume > SMA 20 (${String.format(java.util.Locale.US, "%.2f", volumeReport.volumeToSmaRatio)}x)" to
@@ -516,10 +560,188 @@ object IndicatorAndConfluenceEngines {
             volumeEngine = volumeReport,
             mtfEngine = mtfReport,
             newsEngine = newsReport,
+            smartMoneyEngine = smartMoneyReport,
+            sessionEngine = sessionReport,
+            htfAlignmentGuard = htfAlignmentReport,
+            breakoutProbability = breakoutProbReport,
             verdict = verdict,
             bullishConfluenceScore = finalBullScore,
             bearishConfluenceScore = finalBearScore,
             confluenceChecklist = checklist
+        )
+    }
+
+    /**
+     * 13. MESIN SESI PERDAGANGAN GLOBAL (GLOBAL TRADING SESSION ENGINE)
+     * Menghitung jam UTC dan menentukan sesi pasar dunia aktif (Asia, London, NY, Overlap).
+     */
+    fun runSessionEngine(epochSec: Long): TradingSessionReport {
+        val safeEpoch = if (epochSec > 0) epochSec else System.currentTimeMillis() / 1000L
+        val utcHour = ((safeEpoch % 86400L) / 3600L).toInt()
+
+        val activeSession = when {
+            utcHour in 12..15 -> GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
+            utcHour in 16..20 -> GlobalMarketSession.NEW_YORK
+            utcHour in 7..11 -> GlobalMarketSession.LONDON
+            utcHour in 0..6 -> GlobalMarketSession.ASIA_PACIFIC
+            else -> GlobalMarketSession.PACIFIC_OFFPEAK
+        }
+
+        val isOverlap = activeSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
+        val isHighLiquidity = activeSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP ||
+            activeSession == GlobalMarketSession.NEW_YORK ||
+            activeSession == GlobalMarketSession.LONDON
+
+        val advice = when (activeSession) {
+            GlobalMarketSession.LONDON_NEW_YORK_OVERLAP ->
+                "Sesi Emas London-NY Overlap: Likuiditas tertinggi hari ini. Sangat ideal mengeksekusi sinyal tren Candle [1] dengan target TP penuh."
+            GlobalMarketSession.NEW_YORK ->
+                "Sesi New York: Momentum tinggi pasca rilis data AS. Perhatikan reaksi harga pada level S1/R1."
+            GlobalMarketSession.LONDON ->
+                "Sesi London: Pembukaan pasar Eropa. Volume meningkat tajam mengikuti arah tren akumulasi."
+            GlobalMarketSession.ASIA_PACIFIC ->
+                "Sesi Asia: Rentang harga cenderung sempit (akumulasi). Waspadai jebakan sapuan likuiditas (Asian sweep) sebelum breakout sesi London."
+            GlobalMarketSession.PACIFIC_OFFPEAK ->
+                "Sesi Off-Peak Pasifik: Volume rendah dan spread berpotensi melebar. Disarankan memantau tanpa membuka posisi baru."
+        }
+
+        return TradingSessionReport(
+            activeSession = activeSession,
+            utcHour = utcHour,
+            isLondonNyOverlap = isOverlap,
+            isHighLiquidityWindow = isHighLiquidity,
+            sessionAdvice = advice
+        )
+    }
+
+    /**
+     * 14. PENGAWAL KESELARASAN TREN HTF (HTF TREND ALIGNMENT GUARD)
+     * Membandingkan arah tren timeframe aktif terhadap timeframe utama H1/M30.
+     */
+    fun runHtfAlignmentGuard(
+        activeTimeframe: Timeframe,
+        allTimeframeBars: Map<Timeframe, List<Mt5RateBar>>,
+        symbol: MarketSymbol
+    ): HtfAlignmentReport {
+        val htfBars = allTimeframeBars[Timeframe.H1] ?: allTimeframeBars[Timeframe.M30]
+        val activeBars = allTimeframeBars[activeTimeframe]
+
+        if (htfBars == null || htfBars.size < 30 || activeBars == null || activeBars.size < 30) {
+            return HtfAlignmentReport(
+                status = HtfAlignmentStatus.HTF_RANGE_NEUTRAL,
+                htfTrendLabel = "Tren H1 Netral",
+                ltfTrendLabel = "Timeframe Aktif (${activeTimeframe.label})",
+                advice = "Data timeframe tinggi sedang disinkronkan.",
+                riskModifierNote = "Standar 1 : 1.5"
+            )
+        }
+
+        val htfTrend = runTrendEngine(htfBars, symbol)
+        val ltfTrend = runTrendEngine(activeBars, symbol)
+
+        val isHtfBull = htfTrend.classification in listOf(TrendClassification.STRONG_BULLISH, TrendClassification.BULLISH)
+        val isHtfBear = htfTrend.classification in listOf(TrendClassification.STRONG_BEARISH, TrendClassification.BEARISH)
+        val isLtfBull = ltfTrend.classification in listOf(TrendClassification.STRONG_BULLISH, TrendClassification.BULLISH)
+        val isLtfBear = ltfTrend.classification in listOf(TrendClassification.STRONG_BEARISH, TrendClassification.BEARISH)
+
+        val status = when {
+            (isHtfBull && isLtfBull) || (isHtfBear && isLtfBear) -> HtfAlignmentStatus.PERFECT_ALIGNMENT
+            (isHtfBull && isLtfBear) || (isHtfBear && isLtfBull) -> HtfAlignmentStatus.COUNTER_TREND_WARNING
+            else -> HtfAlignmentStatus.HTF_RANGE_NEUTRAL
+        }
+
+        val advice = when (status) {
+            HtfAlignmentStatus.PERFECT_ALIGNMENT ->
+                "Sinyal ${activeTimeframe.label} SEARAH dengan tren besar H1 (${htfTrend.classification.label}). Probabilitas tinggi: Target profit 1.5R - 2.0R direkomendasikan."
+            HtfAlignmentStatus.COUNTER_TREND_WARNING ->
+                "PERINGATAN: Sinyal ${activeTimeframe.label} MELAWAN tren utama H1 (${htfTrend.classification.label}). Ini adalah transaksi Counter-Trend: Pasang TP lebih konservatif (1.0R) dan segera geser SL ke BEP (impas)."
+            HtfAlignmentStatus.HTF_RANGE_NEUTRAL ->
+                "Tren besar H1 saat ini berkonsolidasi. Jalankan strategi swing normal dengan batas SL/TP proporsional."
+        }
+
+        val riskNote = when (status) {
+            HtfAlignmentStatus.PERFECT_ALIGNMENT -> "Rasio RR Penuh 1 : 1.5 – 1 : 2.0 (High Win-Rate)"
+            HtfAlignmentStatus.COUNTER_TREND_WARNING -> "Konservatif: Target 1.0R (Cepat Amankan Profit)"
+            HtfAlignmentStatus.HTF_RANGE_NEUTRAL -> "Rasio Standar 1 : 1.5"
+        }
+
+        return HtfAlignmentReport(
+            status = status,
+            htfTrendLabel = htfTrend.classification.label,
+            ltfTrendLabel = ltfTrend.classification.label,
+            advice = advice,
+            riskModifierNote = riskNote
+        )
+    }
+
+    /**
+     * 15. MESIN PROBABILITAS BREAKOUT VOLATILITAS HISTORIS
+     * Memetakan volatilitas historis (ATR & standard deviation envelope) terhadap level Support/Resistance
+     * untuk menghasilkan 'Probability Zone' (Peluang Breakout Naik, Breakdown Turun, atau Range-Bound).
+     */
+    fun computeBreakoutProbability(
+        bars: List<Mt5RateBar>,
+        atr14: Double,
+        nearestSupport: Double,
+        nearestResistance: Double
+    ): VolatilityBreakoutProbabilityReport {
+        val bar1 = bars.getOrNull(1) ?: bars.firstOrNull() ?: Mt5RateBar(
+            barIndex = 0, timeEpochSec = 0, open = 2600.0, high = 2605.0, low = 2595.0, close = 2600.0,
+            tickVolume = 100, realVolume = 1000, spread = 20
+        )
+        val currentPrice = bar1.close
+        val safeAtr = atr14.coerceAtLeast(0.01)
+
+        val distToRes = (nearestResistance - currentPrice).coerceAtLeast(0.001)
+        val distToSupp = (currentPrice - nearestSupport).coerceAtLeast(0.001)
+
+        val distToResAtr = distToRes / safeAtr
+        val distToSuppAtr = distToSupp / safeAtr
+
+        // Titik volatilitas historis 25 candle terakhir
+        val pointCount = 25.coerceAtMost(bars.size)
+        val recentPoints = (0 until pointCount).map { i ->
+            val b = bars[i]
+            val envelope = safeAtr * 1.25
+            VolatilityBreakoutPoint(
+                barIndex = b.barIndex,
+                closePrice = b.close,
+                upperVolBand = b.close + envelope,
+                lowerVolBand = b.close - envelope,
+                historicalVolatility = envelope
+            )
+        }.reversed()
+
+        // Bobot probabilitas breakout berbasis jarak ATR dan posisi harga
+        val bullRaw = (48.0 / (distToResAtr + 0.65)).coerceIn(10.0, 75.0)
+        val bearRaw = (48.0 / (distToSuppAtr + 0.65)).coerceIn(10.0, 75.0)
+        val rangeRaw = (50.0 * (distToResAtr + distToSuppAtr) / 2.0).coerceIn(20.0, 60.0)
+
+        val total = bullRaw + bearRaw + rangeRaw
+        val bullPct = ((bullRaw / total) * 100).toInt().coerceIn(5, 80)
+        val bearPct = ((bearRaw / total) * 100).toInt().coerceIn(5, 80)
+        val rangePct = (100 - bullPct - bearPct).coerceAtLeast(10)
+
+        val riskLabel = when {
+            bullPct >= 45 -> "Tinggi: Uji Breakout Resistance ($nearestResistance)"
+            bearPct >= 45 -> "Tinggi: Uji Breakdown Support ($nearestSupport)"
+            distToResAtr < 0.7 -> "Sedang: Harga Mendekati Resistance R1"
+            distToSuppAtr < 0.7 -> "Sedang: Harga Mendekati Support S1"
+            else -> "Rendah: Harga di Tengah Zona Konsolidasi"
+        }
+
+        return VolatilityBreakoutProbabilityReport(
+            bullishBreakoutProbPct = bullPct,
+            bearishBreakdownProbPct = bearPct,
+            rangeBoundHoldProbPct = rangePct,
+            resistancePrice = nearestResistance,
+            supportPrice = nearestSupport,
+            currentPrice = currentPrice,
+            historicalAtr = safeAtr,
+            distanceToResistanceAtr = distToResAtr,
+            distanceToSupportAtr = distToSuppAtr,
+            primaryBreakoutRisk = riskLabel,
+            recentVolatilityPoints = recentPoints
         )
     }
 

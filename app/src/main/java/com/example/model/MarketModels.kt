@@ -489,6 +489,98 @@ enum class AnalyticalVerdict(val label: String) {
     STRONG_BEARISH_CONFLUENCE("KONFLUENSI TURUN KUAT (BEARISH) [CANDLE 1]")
 }
 
+// 12. SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)
+enum class FvgType(val label: String, val isBullish: Boolean) {
+    BULLISH_FVG("Bullish FVG (Celah Diskon Beli)", true),
+    BEARISH_FVG("Bearish FVG (Celah Premium Jual)", false)
+}
+
+data class FairValueGap(
+    val barIndex: Int,
+    val type: FvgType,
+    val topPrice: Double,
+    val bottomPrice: Double,
+    val isMitigated: Boolean,
+    val ageBars: Int
+)
+
+data class OrderBlock(
+    val barIndex: Int,
+    val isBullish: Boolean,
+    val topPrice: Double,
+    val bottomPrice: Double,
+    val label: String
+)
+
+data class SmartMoneyReport(
+    val activeFvgs: List<FairValueGap>,
+    val nearestBullishFvg: FairValueGap?,
+    val nearestBearishFvg: FairValueGap?,
+    val activeOrderBlocks: List<OrderBlock>,
+    val closedBar1InFvg: Boolean,
+    val fvgConfluenceNote: String
+)
+
+// 13. GLOBAL TRADING SESSION ENGINE
+enum class GlobalMarketSession(
+    val sessionName: String,
+    val localHoursWib: String,
+    val liquidityRating: String,
+    val recommendation: String
+) {
+    LONDON_NEW_YORK_OVERLAP("London & NY Overlap (Sesi Emas)", "19:00 - 23:00 WIB", "SANGAT TINGGI", "Sesi paling likuid dengan volume transaksi terbesar."),
+    NEW_YORK("Sesi New York (Wall Street)", "19:00 - 04:00 WIB", "TINGGI", "Momentum tinggi pasca rilis berita ekonomi AS."),
+    LONDON("Sesi London (Eropa)", "14:00 - 23:00 WIB", "TINGGI", "Awal pergerakan terarah dan ekspansi volume hari ini."),
+    ASIA_PACIFIC("Sesi Asia-Pasifik (Tokyo/Sydney)", "06:00 - 14:00 WIB", "SEDANG", "Rentang konsolidasi. Waspada sapuan likuiditas (Asian sweep)."),
+    PACIFIC_OFFPEAK("Sesi Off-Peak Pasifik", "04:00 - 06:00 WIB", "RENDAH", "Spread rawan melebar. Disarankan wait and see.")
+}
+
+data class TradingSessionReport(
+    val activeSession: GlobalMarketSession,
+    val utcHour: Int,
+    val isLondonNyOverlap: Boolean,
+    val isHighLiquidityWindow: Boolean,
+    val sessionAdvice: String
+)
+
+// 14. HTF TREND ALIGNMENT GUARD
+enum class HtfAlignmentStatus(val label: String, val isAligned: Boolean) {
+    PERFECT_ALIGNMENT("SEARAH TREN UTAMA H1 (High Probability)", true),
+    COUNTER_TREND_WARNING("⚠️ MELAWAN TREN UTAMA H1 (Counter-Trend)", false),
+    HTF_RANGE_NEUTRAL("TREN H1 SEDANG SIDEWAYS / KONSOLIDASI", true)
+}
+
+data class HtfAlignmentReport(
+    val status: HtfAlignmentStatus,
+    val htfTrendLabel: String,
+    val ltfTrendLabel: String,
+    val advice: String,
+    val riskModifierNote: String
+)
+
+// 15. HISTORICAL VOLATILITY & BREAKOUT PROBABILITY ZONE
+data class VolatilityBreakoutPoint(
+    val barIndex: Int,
+    val closePrice: Double,
+    val upperVolBand: Double,
+    val lowerVolBand: Double,
+    val historicalVolatility: Double
+)
+
+data class VolatilityBreakoutProbabilityReport(
+    val bullishBreakoutProbPct: Int,
+    val bearishBreakdownProbPct: Int,
+    val rangeBoundHoldProbPct: Int,
+    val resistancePrice: Double,
+    val supportPrice: Double,
+    val currentPrice: Double,
+    val historicalAtr: Double,
+    val distanceToResistanceAtr: Double,
+    val distanceToSupportAtr: Double,
+    val primaryBreakoutRisk: String,
+    val recentVolatilityPoints: List<VolatilityBreakoutPoint>
+)
+
 data class CompleteHubAnalysis(
     val symbol: MarketSymbol,
     val brokerSuffix: String,
@@ -504,6 +596,10 @@ data class CompleteHubAnalysis(
     val volumeEngine: VolumeEngineReport,
     val mtfEngine: MtfEngineReport,
     val newsEngine: NewsEngineReport,
+    val smartMoneyEngine: SmartMoneyReport,
+    val sessionEngine: TradingSessionReport,
+    val htfAlignmentGuard: HtfAlignmentReport,
+    val breakoutProbability: VolatilityBreakoutProbabilityReport,
     val verdict: AnalyticalVerdict,
     val bullishConfluenceScore: Int,
     val bearishConfluenceScore: Int,

@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -76,6 +77,7 @@ import com.example.model.SrInteractionType
 import com.example.model.Timeframe
 import com.example.ui.HubUiState
 import com.example.ui.components.InteractiveMt5ChartCanvas
+import com.example.ui.components.VolatilityProbabilityZoneVisualizer
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
 import com.example.ui.theme.BullishBg
@@ -654,6 +656,91 @@ fun HudTerminalScreen(
                     )
                 }
 
+                // Badge Sesi Pasar Global & HTF Guard
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val session = analysis.sessionEngine
+                    val htf = analysis.htfAlignmentGuard
+
+                    // Badge Sesi Pasar
+                    Surface(
+                        color = if (session.isHighLiquidityWindow) BullishEmerald.copy(alpha = 0.12f) else SlateSurfaceElevated,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, if (session.isHighLiquidityWindow) BullishEmerald.copy(alpha = 0.4f) else SlateCardBorder),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "🌍",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Column {
+                                Text(
+                                    text = session.activeSession.sessionName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (session.isHighLiquidityWindow) BullishEmerald else TextPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Likuiditas: ${session.activeSession.liquidityRating} (${session.activeSession.localHoursWib})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary,
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // Badge HTF Guard
+                    val isHtfAligned = htf.status.isAligned
+                    Surface(
+                        color = if (isHtfAligned) CyanSecondary.copy(alpha = 0.12f) else BearishCrimson.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(1.dp, if (isHtfAligned) CyanSecondary.copy(alpha = 0.4f) else BearishCrimson.copy(alpha = 0.4f)),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = if (isHtfAligned) "🛡️" else "⚠️",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            Column {
+                                Text(
+                                    text = if (isHtfAligned) "SEARAH TREN H1" else "COUNTER-TREND H1",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isHtfAligned) CyanSecondary else BearishCrimson,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = htf.riskModifierNote,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary,
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+
                 InteractiveMt5ChartCanvas(
                     analysis = analysis,
                     inspectedBarIndex = uiState.inspectedBarIndex,
@@ -672,10 +759,15 @@ fun HudTerminalScreen(
             val bar1Close = analysis.bars.getOrNull(1)?.close ?: analysis.bars.first().close
             val suppVal = sr.nearestSupport?.centerPrice ?: (bar1Close - vol.atr14 * 1.5)
             val resVal = sr.nearestResistance?.centerPrice ?: (bar1Close + vol.atr14 * 1.5)
+            val isBullishBias = analysis.bullishConfluenceScore >= analysis.bearishConfluenceScore
+            val entryVal = bar1Close
+            val slVal = if (isBullishBias) vol.longStopReferencePrice else vol.shortStopReferencePrice
+            val tpVal = if (isBullishBias) vol.longTarget1RPrice else vol.shortTarget1RPrice
+            val formatEntry = formatPrice(entryVal, digits)
             val formatSupp = formatPrice(suppVal, digits)
             val formatRes = formatPrice(resVal, digits)
-            val formatSl = formatPrice(vol.longStopReferencePrice, digits)
-            val formatTp = formatPrice(vol.longTarget1RPrice, digits)
+            val formatSl = formatPrice(slVal, digits)
+            val formatTp = formatPrice(tpVal, digits)
             val riskDistance = formatPrice(vol.atr14 * 1.5, digits)
             val rewardDistance = formatPrice(vol.atr14 * 2.25, digits)
             val patternLabel = analysis.candleEngine.activeClosedPatterns.firstOrNull()?.pattern?.displayName ?: "Netral / Tanpa Pola Khusus"
@@ -768,12 +860,24 @@ fun HudTerminalScreen(
                                     "• Proyeksi Target (Reward 1.5R): $rewardDistance point/pip ($${formatPrice(vol.atr14 * 2.25, digits)}).\n" +
                                     "• Rasio Risk-to-Reward: 1 : 1.5 (Sangat Sehat).\n" +
                                     "• Struktur Pasar (HH/HL/LH/LL): ${analysis.structureEngine.classification.label}.\n" +
-                                    "• Ayunan Terakhir: ${analysis.structureEngine.confirmedSwings.firstOrNull()?.let { "${it.label.shortCode} (${it.label.fullName}) di ${formatPrice(it.price, digits)}" } ?: "Menunggu titik swing baru"}.",
+                                    "• Smart Money (FVG & OB): ${analysis.smartMoneyEngine.fvgConfluenceNote}\n" +
+                                    "• Sesi Pasar: ${analysis.sessionEngine.activeSession.sessionName} (${analysis.sessionEngine.activeSession.localHoursWib}) — ${analysis.sessionEngine.sessionAdvice}\n" +
+                                    "• Konfirmasi Tren Besar H1: ${analysis.htfAlignmentGuard.advice}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
                             )
                         }
                     }
+
+                    // 5C. DIAGRAM VISUAL RISK VS REWARD (RR 1 : 1.5)
+                    RiskRewardVisualizerBar(
+                        entryPriceText = formatEntry,
+                        stopLossPriceText = formatSl,
+                        targetProfitPriceText = formatTp,
+                        riskPointsText = riskDistance,
+                        rewardPointsText = rewardDistance,
+                        isBullishBias = isBullishBias
+                    )
 
                     Text(
                         text = "LEVEL HARGA MT5 (KETUK BADGE UNTUK SALIN):",
@@ -826,8 +930,70 @@ fun HudTerminalScreen(
                             modifier = Modifier.weight(1f)
                         )
                     }
+
+                    // Tombol 1-Klik Salin Rencana Trading Lengkap
+                    val clipboard = LocalClipboardManager.current
+                    val ctx = LocalContext.current
+                    Button(
+                        onClick = {
+                            val fullPlan = buildString {
+                                appendLine("📌 RENCANA TRADING MT5: ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
+                                appendLine("• Arah Rekomendasi: ${if (isBullishBias) "BUY (Pantulan Support)" else "SELL (Tolakan Resistance)"}")
+                                appendLine("• Entry (Candle 1): $formatEntry")
+                                appendLine("• Stop Loss (SL): $formatSl (Toleransi: -$riskDistance pt)")
+                                appendLine("• Take Profit (TP): $formatTp (Target: +$rewardDistance pt)")
+                                appendLine("• Rasio Risk/Reward: 1 : 1.5")
+                                appendLine("• Support Terdekat (S1): $formatSupp")
+                                appendLine("• Resistance Terdekat (R1): $formatRes")
+                                appendLine("• Smart Money: ${analysis.smartMoneyEngine.fvgConfluenceNote}")
+                                appendLine("• Sesi Pasar: ${analysis.sessionEngine.activeSession.sessionName} (${analysis.sessionEngine.activeSession.localHoursWib})")
+                                appendLine("• Konfirmasi Tren H1: ${analysis.htfAlignmentGuard.status.label}")
+                                appendLine("• Dibuat oleh: HUB Pattern Engine")
+                            }
+                            clipboard.setText(AnnotatedString(fullPlan))
+                            Toast.makeText(
+                                ctx,
+                                "✓ Rencana trading lengkap tersalin! Siap di-paste ke MetaTrader 5 / Catatan",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = SlateSurfaceElevated,
+                            contentColor = CyanSecondary
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, CyanSecondary.copy(alpha = 0.5f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("chart_copy_full_trading_plan")
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "Salin Rencana Lengkap",
+                                tint = CyanSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "SALIN RENCANA TRADING LENGKAP KE MT5",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = CyanSecondary
+                            )
+                        }
+                    }
                 }
             }
+        }
+
+        // 6. VISUALISASI PROBABILITAS BREAKOUT VOLATILITAS HISTORIS KE LEVEL S/R (GAYA RECHARTS)
+        item {
+            VolatilityProbabilityZoneVisualizer(
+                analysis = analysis
+            )
         }
 
         // 7. Detail Anatomi Candle & Referensi Jarak Stop/Target ATR(14)
@@ -1089,6 +1255,206 @@ private fun MetricMiniCol(label: String, value: String) {
             style = MaterialTheme.typography.labelLarge,
             color = TextPrimary
         )
+    }
+}
+
+@Composable
+private fun RiskRewardVisualizerBar(
+    entryPriceText: String,
+    stopLossPriceText: String,
+    targetProfitPriceText: String,
+    riskPointsText: String,
+    rewardPointsText: String,
+    isBullishBias: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        color = SlateSurfaceElevated,
+        shape = RoundedCornerShape(12.dp),
+        border = BorderStroke(1.dp, SlateCardBorder),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "⚖️ DIAGRAM VISUAL RISK VS REWARD",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = GoldBright,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    color = BullishEmerald.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(6.dp)
+                ) {
+                    Text(
+                        text = "RASIO 1 : 1.5",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BullishEmerald,
+                        fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            // Labels Row: Stop Loss | Entry | Target Profit
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(horizontalAlignment = Alignment.Start) {
+                    Text(
+                        text = "STOP LOSS (-1.0R)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BearishCrimson,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = stopLossPriceText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "-$riskPointsText pt",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BearishCrimson.copy(alpha = 0.8f),
+                        fontSize = 9.sp
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "ENTRY POINT",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = CyanSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = entryPriceText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = CyanSecondary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isBullishBias) "▲ Titik Buy" else "▼ Titik Sell",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = TextSecondary,
+                        fontSize = 9.sp
+                    )
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "TARGET PROFIT (+1.5R)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BullishEmerald,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = targetProfitPriceText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "+$rewardPointsText pt",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = BullishEmerald.copy(alpha = 0.8f),
+                        fontSize = 9.sp
+                    )
+                }
+            }
+
+            // The Segmented Visual Bar
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ObsidianBg)
+                    .border(1.dp, SlateCardBorder, RoundedCornerShape(8.dp))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Risk Segment (Weight 1.0)
+                    Box(
+                        modifier = Modifier
+                            .weight(1.0f)
+                            .fillMaxHeight()
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        BearishCrimson.copy(alpha = 0.85f),
+                                        BearishCrimson.copy(alpha = 0.65f)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "RISK (1.0R)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.sp
+                        )
+                    }
+
+                    // Entry Marker Divider
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .fillMaxHeight()
+                            .background(CyanSecondary)
+                    )
+
+                    // Reward Segment (Weight 1.5)
+                    Box(
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .fillMaxHeight()
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        BullishEmerald.copy(alpha = 0.65f),
+                                        BullishEmerald.copy(alpha = 0.90f)
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "PROYEKSI REWARD (1.5R)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextPrimary,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+            }
+
+            // Visual Explanation Caption
+            Text(
+                text = "💡 Batang hijau (+1.5R) 1.5x lebih panjang dari batang merah (-1.0R). Artinya, potensi profit melampaui toleransi risiko.",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+        }
     }
 }
 

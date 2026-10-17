@@ -678,6 +678,138 @@ object CandleAndStructureEngines {
         )
     }
 
+    /**
+     * 12. MESIN SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)
+     * Mendeteksi Fair Value Gap (ketidakseimbangan 3-candle) dan Order Blocks
+     * secara murni pada candle yang sudah tutup (barIndex >= 1) non-repaint.
+     */
+    fun runSmartMoneyEngine(
+        bars: List<Mt5RateBar>,
+        atr14: Double
+    ): com.example.model.SmartMoneyReport {
+        if (bars.size < 10) {
+            return com.example.model.SmartMoneyReport(
+                activeFvgs = emptyList(),
+                nearestBullishFvg = null,
+                nearestBearishFvg = null,
+                activeOrderBlocks = emptyList(),
+                closedBar1InFvg = false,
+                fvgConfluenceNote = "Data candle belum mencukupi untuk pemindaian FVG."
+            )
+        }
+
+        val bar1 = bars[1]
+        val minGapThreshold = atr14 * 0.15 // Filter gap mikro/noise
+        val detectedFvgs = mutableListOf<com.example.model.FairValueGap>()
+        val detectedObs = mutableListOf<com.example.model.OrderBlock>()
+
+        // Periksa 35 candle tutup terbaru (barIndex 1 sampai 35)
+        val limit = (bars.size - 3).coerceAtMost(35)
+        for (i in 1..limit) {
+            val candleCurrent = bars[i]
+            val candleMiddle = bars[i + 1]
+            val candlePrior = bars[i + 2]
+
+            // Bullish FVG: Low candle i > High candle i+2 (candle middle naik impulsif)
+            if (candleCurrent.low > candlePrior.high + minGapThreshold && candleMiddle.isBullish) {
+                val top = candleCurrent.low
+                val bottom = candlePrior.high
+                val isMitigated = (1 until i).any { idx ->
+                    bars[idx].low <= bottom
+                }
+                detectedFvgs.add(
+                    com.example.model.FairValueGap(
+                        barIndex = i,
+                        type = com.example.model.FvgType.BULLISH_FVG,
+                        topPrice = top,
+                        bottomPrice = bottom,
+                        isMitigated = isMitigated,
+                        ageBars = i - 1
+                    )
+                )
+            }
+
+            // Bearish FVG: High candle i < Low candle i+2 (candle middle turun impulsif)
+            if (candleCurrent.high < candlePrior.low - minGapThreshold && candleMiddle.isBearish) {
+                val top = candlePrior.low
+                val bottom = candleCurrent.high
+                val isMitigated = (1 until i).any { idx ->
+                    bars[idx].high >= top
+                }
+                detectedFvgs.add(
+                    com.example.model.FairValueGap(
+                        barIndex = i,
+                        type = com.example.model.FvgType.BEARISH_FVG,
+                        topPrice = top,
+                        bottomPrice = bottom,
+                        isMitigated = isMitigated,
+                        ageBars = i - 1
+                    )
+                )
+            }
+
+            // Order Block Detection:
+            // Bullish OB: candle bearish terakhir sebelum ledakan candle bullish
+            if (candlePrior.isBearish && candleMiddle.isBullish && candleCurrent.isBullish &&
+                candleCurrent.close > candlePrior.high && detectedObs.size < 3
+            ) {
+                detectedObs.add(
+                    com.example.model.OrderBlock(
+                        barIndex = i + 2,
+                        isBullish = true,
+                        topPrice = candlePrior.high,
+                        bottomPrice = candlePrior.low,
+                        label = "Bullish Order Block (Candle [${i + 2}])"
+                    )
+                )
+            } else if (candlePrior.isBullish && candleMiddle.isBearish && candleCurrent.isBearish &&
+                candleCurrent.close < candlePrior.low && detectedObs.size < 3
+            ) {
+                detectedObs.add(
+                    com.example.model.OrderBlock(
+                        barIndex = i + 2,
+                        isBullish = false,
+                        topPrice = candlePrior.high,
+                        bottomPrice = candlePrior.low,
+                        label = "Bearish Order Block (Candle [${i + 2}])"
+                    )
+                )
+            }
+        }
+
+        val unmitigatedFvgs = detectedFvgs.filter { !it.isMitigated }
+        val nearestBullFvg = unmitigatedFvgs.filter { it.type.isBullish }
+            .minByOrNull { kotlin.math.abs(bar1.close - it.topPrice) }
+        val nearestBearFvg = unmitigatedFvgs.filter { !it.type.isBullish }
+            .minByOrNull { kotlin.math.abs(bar1.close - it.bottomPrice) }
+
+        // Periksa apakah candle 1 sedang berada di dalam FVG aktif
+        val bar1InFvg = unmitigatedFvgs.any { fvg ->
+            bar1.close in fvg.bottomPrice..fvg.topPrice
+        }
+
+        val note = when {
+            bar1InFvg && nearestBullFvg != null && bar1.close in nearestBullFvg.bottomPrice..nearestBullFvg.topPrice ->
+                "Candle [1] Re-test di area Bullish FVG (${nearestBullFvg.bottomPrice.formatPrice(bar1.close)} – ${nearestBullFvg.topPrice.formatPrice(bar1.close)}). Area diskon Smart Money."
+            bar1InFvg && nearestBearFvg != null && bar1.close in nearestBearFvg.bottomPrice..nearestBearFvg.topPrice ->
+                "Candle [1] Re-test di area Bearish FVG (${nearestBearFvg.bottomPrice.formatPrice(bar1.close)} – ${nearestBearFvg.topPrice.formatPrice(bar1.close)}). Area premium Smart Money."
+            nearestBullFvg != null ->
+                "FVG Bullish belum termitigasi di ${nearestBullFvg.bottomPrice.formatPrice(bar1.close)} – ${nearestBullFvg.topPrice.formatPrice(bar1.close)} (${nearestBullFvg.ageBars} bar lalu)."
+            nearestBearFvg != null ->
+                "FVG Bearish belum termitigasi di ${nearestBearFvg.bottomPrice.formatPrice(bar1.close)} – ${nearestBearFvg.topPrice.formatPrice(bar1.close)} (${nearestBearFvg.ageBars} bar lalu)."
+            else -> "Tidak ada Fair Value Gap (FVG) signifikan yang terbuka."
+        }
+
+        return com.example.model.SmartMoneyReport(
+            activeFvgs = unmitigatedFvgs.take(5),
+            nearestBullishFvg = nearestBullFvg,
+            nearestBearishFvg = nearestBearFvg,
+            activeOrderBlocks = detectedObs,
+            closedBar1InFvg = bar1InFvg,
+            fvgConfluenceNote = note
+        )
+    }
+
     private fun Double.format1(): String = String.format(java.util.Locale.US, "%.1f", this)
     private fun Double.formatPrice(ref: Double): String {
         val decimals = if (ref > 100.0) 2 else 5

@@ -637,6 +637,77 @@ fun TenEnginesScreen(
             }
         }
 
+        // 13. SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)
+        item {
+            val sm = analysis.smartMoneyEngine
+            EngineSectionCard(
+                engineNumber = "13",
+                title = "SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)",
+                badgeText = if (sm.closedBar1InFvg) "CANDLE [1] DI AREA FVG" else "${sm.activeFvgs.size} FVG AKTIF",
+                badgeColor = if (sm.closedBar1InFvg) BullishEmerald else CyanSecondary
+            ) {
+                EngineRow("Status Candle Tutup [1]", if (sm.closedBar1InFvg) "Menguji / Re-test Area Celah FVG" else "Di Luar Area Celah FVG")
+                EngineRow("FVG Belum Termitigasi", "${sm.activeFvgs.size} Celah Terbuka (Non-Repaint)")
+                EngineRow("Order Blocks Terdeteksi", "${sm.activeOrderBlocks.size} Zona Institusional")
+                if (sm.nearestBullishFvg != null) {
+                    EngineRow("Nearest Bullish FVG", "${String.format(Locale.US, "%.2f", sm.nearestBullishFvg.bottomPrice)} – ${String.format(Locale.US, "%.2f", sm.nearestBullishFvg.topPrice)} (${sm.nearestBullishFvg.ageBars} bar)")
+                }
+                if (sm.nearestBearishFvg != null) {
+                    EngineRow("Nearest Bearish FVG", "${String.format(Locale.US, "%.2f", sm.nearestBearishFvg.bottomPrice)} – ${String.format(Locale.US, "%.2f", sm.nearestBearishFvg.topPrice)} (${sm.nearestBearishFvg.ageBars} bar)")
+                }
+                HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    text = "💡 Catatan Smart Money: ${sm.fvgConfluenceNote}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        // 14. GLOBAL TRADING SESSION ENGINE
+        item {
+            val session = analysis.sessionEngine
+            EngineSectionCard(
+                engineNumber = "14",
+                title = "MESIN SESI PASAR GLOBAL (ASIA / LONDON / NY)",
+                badgeText = session.activeSession.sessionName,
+                badgeColor = if (session.isHighLiquidityWindow) BullishEmerald else NeutralAmber
+            ) {
+                EngineRow("Sesi Pasar Berjalan", session.activeSession.sessionName)
+                EngineRow("Jam Lokal WIB", session.activeSession.localHoursWib)
+                EngineRow("Tingkat Likuiditas Pasar", session.activeSession.liquidityRating)
+                EngineRow("Status Overlap London-NY", if (session.isLondonNyOverlap) "YA (SESI EMAS VOLUME TERTINGGI)" else "TIDAK (Sesi Reguler)")
+                HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    text = "💡 Arahan Eksekusi Sesi: ${session.sessionAdvice}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary
+                )
+            }
+        }
+
+        // 15. HTF TREND ALIGNMENT GUARD
+        item {
+            val htf = analysis.htfAlignmentGuard
+            EngineSectionCard(
+                engineNumber = "15",
+                title = "PENGAWAL KESELARASAN TREN BESAR (HTF GUARD)",
+                badgeText = htf.status.label,
+                badgeColor = if (htf.status.isAligned) BullishEmerald else BearishCrimson
+            ) {
+                EngineRow("Status Keselarasan Tren", htf.status.label)
+                EngineRow("Arah Tren Utama H1/M30", htf.htfTrendLabel)
+                EngineRow("Arah Timeframe Aktif", htf.ltfTrendLabel)
+                EngineRow("Penyesuaian Risiko", htf.riskModifierNote)
+                HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    text = "💡 Rekomendasi Eksekusi: ${htf.advice}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (htf.status.isAligned) CyanSecondary else BearishCrimson
+                )
+            }
+        }
+
         item { Spacer(modifier = Modifier.height(16.dp)) }
     }
 }
