@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -492,6 +494,27 @@ fun TradeSignalScreen(
                         color = TextSecondary
                     )
 
+                    // Presets Modal Cepat
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf("500", "1000", "2500", "5000", "10000").forEach { presetBal ->
+                            val isSel = balanceInput == presetBal
+                            FilterChip(
+                                selected = isSel,
+                                onClick = { balanceInput = presetBal },
+                                label = { Text("$$presetBal", style = MaterialTheme.typography.labelSmall) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoldPrimary.copy(alpha = 0.25f),
+                                    selectedLabelColor = GoldBright
+                                )
+                            )
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -507,14 +530,14 @@ fun TradeSignalScreen(
                                 .testTag("account_balance_input")
                         )
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Pilihan Risiko:", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                        Column(modifier = Modifier.weight(1.1f)) {
+                            Text("Toleransi Risiko:", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf(1.0, 2.0, 3.0).forEach { rPct ->
+                                listOf(0.5, 1.0, 2.0, 3.0).forEach { rPct ->
                                     FilterChip(
                                         selected = selectedRiskPct == rPct,
                                         onClick = { selectedRiskPct = rPct },
-                                        label = { Text("${rPct.toInt()}%", style = MaterialTheme.typography.labelSmall) },
+                                        label = { Text("${if (rPct == 0.5) "0.5" else rPct.toInt().toString()}%", style = MaterialTheme.typography.labelSmall) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = GoldPrimary,
                                             selectedLabelColor = ObsidianBg
@@ -533,8 +556,9 @@ fun TradeSignalScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(12.dp))
                             .background(SlateSurfaceElevated)
+                            .border(1.dp, SlateCardBorder, RoundedCornerShape(12.dp))
                             .clickable {
                                 clipboard.setText(AnnotatedString(lotFormatted))
                                 Toast.makeText(
@@ -546,7 +570,7 @@ fun TradeSignalScreen(
                             .padding(12.dp)
                             .testTag("trade_lot_result_box")
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -555,7 +579,7 @@ fun TradeSignalScreen(
                                 Text("Rekomendasi Ukuran Lot:", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
                                         text = "$lotFormatted Lot",
@@ -563,12 +587,30 @@ fun TradeSignalScreen(
                                         color = GoldBright,
                                         fontWeight = FontWeight.Bold
                                     )
-                                    Icon(
-                                        imageVector = Icons.Default.ContentCopy,
-                                        contentDescription = "Salin Lot",
-                                        tint = GoldBright,
-                                        modifier = Modifier.size(14.dp)
-                                    )
+                                    Surface(
+                                        color = GoldPrimary.copy(alpha = 0.2f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Salin Lot",
+                                                tint = GoldBright,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                            Text(
+                                                text = "SALIN",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = GoldBright,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                             Row(
@@ -577,9 +619,10 @@ fun TradeSignalScreen(
                             ) {
                                 Text("Maksimal Risiko (Stop Loss):", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                                 Text(
-                                    text = "-$${String.format(Locale.US, "%.2f", riskAmountDollars)} (${selectedRiskPct.toInt()}%)",
+                                    text = "-$${String.format(Locale.US, "%.2f", riskAmountDollars)} (${selectedRiskPct}%)",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = BearishCrimson
+                                    color = BearishCrimson,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                             Row(
@@ -590,7 +633,8 @@ fun TradeSignalScreen(
                                 Text(
                                     text = "+$${String.format(Locale.US, "%.2f", estProfitTp1)}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = BullishEmerald
+                                    color = BullishEmerald,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
                             Row(
@@ -601,9 +645,59 @@ fun TradeSignalScreen(
                                 Text(
                                     text = "+$${String.format(Locale.US, "%.2f", estProfitTp2)}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = BullishEmerald
+                                    color = BullishEmerald,
+                                    fontWeight = FontWeight.Bold
                                 )
                             }
+                        }
+                    }
+
+                    // Tombol 1-Klik Salin Rencana Setup Lengkap
+                    Button(
+                        onClick = {
+                            val orderPlan = buildString {
+                                appendLine("🚀 SETUP EKSEKUSI MT5: ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
+                                appendLine("• Aksi: ${if (isBuy) "BUY" else if (isSell) "SELL" else "STANDBY"}")
+                                appendLine("• Entry: ${formatPrice(entryPrice, digits)}")
+                                appendLine("• Lot Rekomendasi: $lotFormatted")
+                                appendLine("• Stop Loss: ${formatPrice(slPrice, digits)} (${slDistancePoints.toInt()} pt)")
+                                appendLine("• Target TP1 (1.5R): ${formatPrice(tp1Price, digits)}")
+                                appendLine("• Target TP2 (2.5R): ${formatPrice(tp2Price, digits)}")
+                                appendLine("• Risiko Dolar: -$${String.format(Locale.US, "%.2f", riskAmountDollars)}")
+                                appendLine("• Estimasi Reward TP1: +$${String.format(Locale.US, "%.2f", estProfitTp1)}")
+                                appendLine("• Feed: ${selectedProvider.shortLabel}")
+                            }
+                            clipboard.setText(AnnotatedString(orderPlan))
+                            Toast.makeText(
+                                ctx,
+                                "✓ Seluruh setup order MT5 disalin ke clipboard!",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = CyanSecondary,
+                            contentColor = ObsidianBg
+                        ),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("copy_complete_order_setup")
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = "SALIN SELURUH SETUP ORDER MT5",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }

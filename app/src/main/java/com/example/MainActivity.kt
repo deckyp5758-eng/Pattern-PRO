@@ -52,6 +52,7 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -90,6 +91,7 @@ import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.theme.ObsidianBg
 import com.example.ui.theme.SlateCardBorder
 import com.example.ui.theme.SlateSurface
+import com.example.ui.theme.SlateSurfaceElevated
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
@@ -185,45 +187,67 @@ fun HubSmartPatternApp() {
         containerColor = ObsidianBg,
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
-            NavigationBar(
-                containerColor = SlateSurface,
-                tonalElevation = 8.dp
-            ) {
-                HubTab.entries.forEach { tab ->
-                    val isSelected = uiState.selectedTab == tab
-                    val icon = when (tab) {
-                        HubTab.HUD_CHART -> Icons.Default.CandlestickChart
-                        HubTab.TRADE -> Icons.AutoMirrored.Filled.TrendingUp
-                        HubTab.ENGINES -> Icons.Default.Analytics
-                        HubTab.MTF_MATRIX -> Icons.Default.Layers
-                        HubTab.NEWS_ENGINE -> Icons.Default.Newspaper
-                        HubTab.MQL5_STUDIO -> Icons.Default.Code
-                        HubTab.SETTINGS -> Icons.Default.Settings
-                    }
-                    NavigationBarItem(
-                        selected = isSelected,
-                        onClick = { viewModel.selectTab(tab) },
-                        icon = {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = tab.title
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = tab.title,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = ObsidianBg,
-                            selectedTextColor = GoldBright,
-                            indicatorColor = GoldPrimary,
-                            unselectedIconColor = TextSecondary,
-                            unselectedTextColor = TextSecondary
-                        ),
-                        modifier = Modifier.testTag("nav_tab_${tab.name.lowercase()}")
+            Surface(
+                color = SlateSurface,
+                tonalElevation = 6.dp,
+                shadowElevation = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(
+                        width = 1.dp,
+                        color = SlateCardBorder.copy(alpha = 0.7f)
                     )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HubTab.entries.forEach { tab ->
+                        val isSelected = uiState.selectedTab == tab
+                        val icon = when (tab) {
+                            HubTab.HUD_CHART -> Icons.Default.CandlestickChart
+                            HubTab.TRADE -> Icons.AutoMirrored.Filled.TrendingUp
+                            HubTab.ENGINES -> Icons.Default.Analytics
+                            HubTab.MTF_MATRIX -> Icons.Default.Layers
+                            HubTab.NEWS_ENGINE -> Icons.Default.Newspaper
+                            HubTab.MQL5_STUDIO -> Icons.Default.Code
+                            HubTab.SETTINGS -> Icons.Default.Settings
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(
+                                    if (isSelected) GoldPrimary else SlateSurfaceElevated.copy(alpha = 0.5f)
+                                )
+                                .clickable { viewModel.selectTab(tab) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                                .testTag("nav_tab_${tab.name.lowercase()}"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = tab.title,
+                                    tint = if (isSelected) ObsidianBg else TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = tab.title,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isSelected) ObsidianBg else TextSecondary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

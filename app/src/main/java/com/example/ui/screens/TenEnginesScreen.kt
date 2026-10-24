@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -21,6 +23,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,6 +33,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -49,9 +57,17 @@ import com.example.ui.theme.GoldPrimary
 import com.example.ui.theme.NeutralAmber
 import com.example.ui.theme.SlateCardBorder
 import com.example.ui.theme.SlateSurface
+import com.example.ui.theme.SlateSurfaceElevated
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 import java.util.Locale
+
+enum class EngineGroup(val label: String) {
+    ALL("Semua (10)"),
+    STRUCTURE("Struktur & Pola (1-4)"),
+    MOMENTUM("Momentum & S/R (5-8)"),
+    MACRO("Makro & Konfluensi (9-10)")
+}
 
 @Composable
 fun TenEnginesScreen(
@@ -72,6 +88,8 @@ fun TenEnginesScreen(
     val mtfEngine = analysis.mtfEngine
     val newsEngine = analysis.newsEngine
 
+    var selectedGroup by remember { mutableStateOf(EngineGroup.ALL) }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -88,24 +106,31 @@ fun TenEnginesScreen(
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, GoldPrimary.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
+                    .border(1.dp, GoldPrimary.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                     .testTag("engines_audit_header_card")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "AUDIT 10 MESIN KUANTITATIF",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = GoldBright,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Column {
+                            Text(
+                                text = "AUDIT 10 MESIN KUANTITATIF",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${analysis.symbol.code} (${analysis.symbol.displayName}) • TF ${analysis.activeTimeframe.label}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = CyanSecondary
+                            )
+                        }
                         Surface(
                             color = BullishEmerald.copy(alpha = 0.16f),
                             shape = RoundedCornerShape(8.dp),
@@ -120,16 +145,41 @@ fun TenEnginesScreen(
                             )
                         }
                     }
-                    Text(
-                        text = "Instrumen: ${analysis.symbol.code} (${analysis.symbol.displayName}) • Timeframe: ${analysis.activeTimeframe.label} (${analysis.activeTimeframe.mt5EnumName})",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
+
                     Text(
                         text = "Semua perhitungan sinyal dikunci mutlak pada Candle Tutup Indeks [1]. Candle [0] hanya sebagai pemantau harga berjalan tanpa mengubah status sinyal historis.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = CyanSecondary
+                        color = TextSecondary
                     )
+
+                    HorizontalDivider(color = SlateCardBorder)
+
+                    // Filter Kategori Mesin
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        EngineGroup.entries.forEach { grp ->
+                            val isSel = selectedGroup == grp
+                            FilterChip(
+                                selected = isSel,
+                                onClick = { selectedGroup = grp },
+                                label = {
+                                    Text(
+                                        text = grp.label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = GoldPrimary,
+                                    selectedLabelColor = com.example.ui.theme.ObsidianBg
+                                )
+                            )
+                        }
+                    }
                 }
             }
         }

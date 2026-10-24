@@ -139,38 +139,32 @@ fun HudTerminalScreen(
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
 
-        // 1. Header Banner dengan Status Koneksi Online Jujur (LIVE vs OFFLINE)
+        // 1. Modern Institutional Terminal Header (Compact & High-Contrast)
         item {
-            Box(
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(128.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .border(1.dp, GoldPrimary.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .border(1.dp, SlateCardBorder, RoundedCornerShape(18.dp))
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.img_quant_hero_banner),
-                    contentDescription = "Header HUB Smart Pattern Engine Pro",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
                         .background(
-                            Brush.horizontalGradient(
+                            Brush.linearGradient(
                                 colors = listOf(
-                                    ObsidianBg.copy(alpha = 0.94f),
-                                    ObsidianBg.copy(alpha = 0.78f),
-                                    ObsidianBg.copy(alpha = 0.55f)
+                                    SlateSurfaceElevated,
+                                    SlateSurface,
+                                    ObsidianBg
                                 )
                             )
                         )
                         .padding(14.dp)
                 ) {
                     Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -180,67 +174,106 @@ fun HudTerminalScreen(
                             val isVerifiedLive = uiState.isProviderOnline && audit.check1EndpointAccessible
                             Surface(
                                 color = if (isVerifiedLive) BullishBg else BearishBg,
-                                shape = RoundedCornerShape(8.dp),
+                                shape = RoundedCornerShape(20.dp),
                                 modifier = Modifier.border(
                                     1.dp,
-                                    if (isVerifiedLive) BullishEmerald else BearishCrimson,
-                                    RoundedCornerShape(8.dp)
+                                    if (isVerifiedLive) BullishEmerald.copy(alpha = 0.6f) else BearishCrimson.copy(alpha = 0.6f),
+                                    RoundedCornerShape(20.dp)
                                 )
                             ) {
                                 Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isVerifiedLive) Icons.Default.CloudDone else Icons.Default.CloudOff,
                                         contentDescription = null,
                                         tint = if (isVerifiedLive) BullishEmerald else BearishCrimson,
-                                        modifier = Modifier.size(14.dp)
+                                        modifier = Modifier.size(13.dp)
                                     )
                                     Text(
                                         text = if (isVerifiedLive) {
-                                            "LIVE ONLINE • HTTP ${audit.lastHttpStatusCode} • NON-REPAINT [1]"
+                                            "LIVE ONLINE • HTTP ${audit.lastHttpStatusCode} • NON-REPAINT"
                                         } else {
-                                            "PROVIDER OFFLINE / GAGAL KONEKSI"
+                                            "PROVIDER OFFLINE"
                                         },
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isVerifiedLive) BullishEmerald else BearishCrimson
+                                        color = if (isVerifiedLive) BullishEmerald else BearishCrimson,
+                                        fontWeight = FontWeight.Bold
                                     )
                                 }
                             }
+
                             IconButton(
                                 onClick = onRefreshData,
                                 modifier = Modifier
-                                    .size(48.dp)
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(SlateSurfaceElevated)
+                                    .border(1.dp, SlateCardBorder, RoundedCornerShape(12.dp))
                                     .testTag("refresh_market_button")
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,
                                     contentDescription = "Perbarui data pasar dan berita terbaru",
-                                    tint = GoldBright
+                                    tint = GoldBright,
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
 
-                        Column {
-                            Text(
-                                text = "HUB SMART PATTERN ENGINE PRO",
-                                style = MaterialTheme.typography.titleLarge,
-                                color = GoldBright
-                            )
-                            Text(
-                                text = "${analysis.dataEngine.symbolWithSuffix} • TF ${analysis.activeTimeframe.label} • Sumber: ${uiState.selectedProvider.displayName}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = CyanSecondary
-                            )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "HUB PATTERN ENGINE PRO",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = GoldBright,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp
+                                )
+                                Text(
+                                    text = analysis.dataEngine.symbolWithSuffix,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    color = TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Surface(
+                                color = ObsidianBg,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.border(1.dp, CyanSecondary.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "TF ${analysis.activeTimeframe.label}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = CyanSecondary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "• ${uiState.selectedProvider.shortLabel}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = TextSecondary
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 2. Pilihan Sumber Data Online (Provider API), Pair, Akhiran Broker, dan Timeframe
+        // 2. Kontrol Seleksi Pasar & Sumber Data Online
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
@@ -253,57 +286,26 @@ fun HudTerminalScreen(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // Pilihan Sumber Server Online (Untuk Menguji Perbedaan Sumber & Mode Offline)
-                    Text(
-                        text = "Sumber Data Server Online (Tanpa Data Lokal/Simulasi):",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = GoldBright
-                    )
+                    // Pilihan Pair XAUUSD vs EURUSD (Segmented Toggle)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OnlineDataProvider.entries.forEach { prov ->
-                            val selected = uiState.selectedProvider == prov
-                            FilterChip(
-                                selected = selected,
-                                onClick = { onSelectProvider(prov) },
-                                label = {
-                                    Text(
-                                        text = prov.shortLabel,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = if (prov.isOfflineTestMode) {
-                                        BearishCrimson.copy(alpha = 0.28f)
-                                    } else {
-                                        CyanSecondary.copy(alpha = 0.25f)
-                                    },
-                                    selectedLabelColor = if (prov.isOfflineTestMode) BearishCrimson else CyanSecondary
-                                ),
-                                modifier = Modifier.testTag("provider_chip_${prov.id}")
-                            )
-                        }
-                    }
-
-                    // Pilihan Pair XAUUSD vs EURUSD
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ObsidianBg)
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         MarketSymbol.entries.forEach { sym ->
                             val isSelected = sym == uiState.selectedSymbol
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isSelected) GoldPrimary else SlateSurfaceElevated)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isSelected) GoldPrimary else ObsidianBg
+                                    )
                                     .clickable { onSelectSymbol(sym) }
-                                    .padding(vertical = 12.dp, horizontal = 10.dp)
+                                    .padding(vertical = 10.dp)
                                     .testTag("symbol_btn_${sym.code}"),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -311,12 +313,14 @@ fun HudTerminalScreen(
                                     Text(
                                         text = sym.code,
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = if (isSelected) ObsidianBg else TextPrimary
+                                        color = if (isSelected) ObsidianBg else TextPrimary,
+                                        fontWeight = FontWeight.Bold
                                     )
                                     Text(
                                         text = sym.displayName,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isSelected) ObsidianBg.copy(alpha = 0.8f) else TextSecondary
+                                        color = if (isSelected) ObsidianBg.copy(alpha = 0.85f) else TextSecondary,
+                                        fontSize = 10.sp
                                     )
                                 }
                             }
@@ -333,9 +337,16 @@ fun HudTerminalScreen(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(48.dp)
+                                    .height(44.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) CyanSecondary else SlateSurfaceElevated)
+                                    .background(
+                                        if (selected) CyanSecondary else SlateSurfaceElevated
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (selected) CyanSecondary else SlateCardBorder,
+                                        RoundedCornerShape(10.dp)
+                                    )
                                     .clickable { onSelectTimeframe(tf) }
                                     .testTag("tf_btn_${tf.label}"),
                                 contentAlignment = Alignment.Center
@@ -343,9 +354,49 @@ fun HudTerminalScreen(
                                 Text(
                                     text = tf.label,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (selected) ObsidianBg else TextPrimary
+                                    color = if (selected) ObsidianBg else TextPrimary,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                 )
                             }
+                        }
+                    }
+
+                    // Pilihan Sumber Provider Online
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Server:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(end = 4.dp)
+                        )
+                        OnlineDataProvider.entries.forEach { prov ->
+                            val selected = uiState.selectedProvider == prov
+                            FilterChip(
+                                selected = selected,
+                                onClick = { onSelectProvider(prov) },
+                                label = {
+                                    Text(
+                                        text = prov.shortLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = if (prov.isOfflineTestMode) {
+                                        BearishCrimson.copy(alpha = 0.28f)
+                                    } else {
+                                        GoldPrimary.copy(alpha = 0.22f)
+                                    },
+                                    selectedLabelColor = if (prov.isOfflineTestMode) BearishCrimson else GoldBright
+                                ),
+                                modifier = Modifier.testTag("provider_chip_${prov.id}")
+                            )
                         }
                     }
                 }
