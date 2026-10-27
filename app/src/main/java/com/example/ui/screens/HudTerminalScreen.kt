@@ -21,11 +21,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudDone
@@ -122,6 +125,7 @@ fun HudTerminalScreen(
     onUpdateMetaApiAuthToken: (String) -> Unit = {},
     onSaveMetaApiCredentials: () -> Unit = {},
     onClearMetaApiCredentials: () -> Unit = {},
+    onNavigateToTrade: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -707,87 +711,79 @@ fun HudTerminalScreen(
                     )
                 }
 
-                // Badge Sesi Pasar Global & HTF Guard
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val session = analysis.sessionEngine
-                    val htf = analysis.htfAlignmentGuard
+                // 5A. Institutional Market Session & Killzone Live Tracker Bar (Ultra-Kompak & Hemat Ruang)
+                val session = analysis.sessionEngine
+                val htf = analysis.htfAlignmentGuard
+                val isHtfAligned = htf.status.isAligned
+                val isLondonKillzone = session.activeSession.sessionName.contains("London", ignoreCase = true)
+                val isOverlap = session.isHighLiquidityWindow
+                val sessionStatusColor = if (isOverlap) BullishEmerald else if (isLondonKillzone) CyanSecondary else NeutralAmber
 
-                    // Badge Sesi Pasar
-                    Surface(
-                        color = if (session.isHighLiquidityWindow) BullishEmerald.copy(alpha = 0.12f) else SlateSurfaceElevated,
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, if (session.isHighLiquidityWindow) BullishEmerald.copy(alpha = 0.4f) else SlateCardBorder),
-                        modifier = Modifier.weight(1f)
+                Surface(
+                    color = SlateSurface,
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(1.dp, sessionStatusColor.copy(alpha = 0.6f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .wrapContentHeight()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.weight(1f)
                         ) {
-                            Text(
-                                text = "🌍",
-                                style = MaterialTheme.typography.labelSmall
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(sessionStatusColor)
                             )
-                            Column {
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                val sessionTitle = if (isOverlap) {
+                                    "KILLZONE: LONDON/NY OVERLAP"
+                                } else {
+                                    session.activeSession.sessionName.uppercase()
+                                }
                                 Text(
-                                    text = session.activeSession.sessionName,
-                                    style = MaterialTheme.typography.labelSmall,
+                                    text = "$sessionTitle • ${session.activeSession.localHoursWib}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = sessionStatusColor,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (session.isHighLiquidityWindow) BullishEmerald else TextPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Likuiditas: ${session.activeSession.liquidityRating} (${session.activeSession.localHoursWib})",
+                                    text = "Likuiditas: ${session.activeSession.liquidityRating} | ${htf.riskModifierNote}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary,
-                                    fontSize = 9.sp,
+                                    fontSize = 10.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
-                    }
 
-                    // Badge HTF Guard
-                    val isHtfAligned = htf.status.isAligned
-                    Surface(
-                        color = if (isHtfAligned) CyanSecondary.copy(alpha = 0.12f) else BearishCrimson.copy(alpha = 0.12f),
-                        shape = RoundedCornerShape(8.dp),
-                        border = BorderStroke(1.dp, if (isHtfAligned) CyanSecondary.copy(alpha = 0.4f) else BearishCrimson.copy(alpha = 0.4f)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        // HTF Trend Pill Kompak
+                        Surface(
+                            color = if (isHtfAligned) CyanSecondary.copy(alpha = 0.15f) else BearishCrimson.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(6.dp),
+                            border = BorderStroke(1.dp, if (isHtfAligned) CyanSecondary.copy(alpha = 0.5f) else BearishCrimson.copy(alpha = 0.5f))
                         ) {
                             Text(
-                                text = if (isHtfAligned) "🛡️" else "⚠️",
-                                style = MaterialTheme.typography.labelSmall
+                                text = if (isHtfAligned) "✓ TREN H1" else "⚠️ COUNTER H1",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isHtfAligned) CyanSecondary else BearishCrimson,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                             )
-                            Column {
-                                Text(
-                                    text = if (isHtfAligned) "SEARAH TREN H1" else "COUNTER-TREND H1",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isHtfAligned) CyanSecondary else BearishCrimson,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = htf.riskModifierNote,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary,
-                                    fontSize = 9.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
                         }
                     }
                 }
@@ -1035,6 +1031,74 @@ fun HudTerminalScreen(
                                 color = CyanSecondary
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // 5C. SHORTCUT INTEGRASI WORKSPACE COCKPIT: TIKET EKSEKUSI MT5 & KALKULATOR LOT
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, GoldPrimary, RoundedCornerShape(16.dp))
+                    .clickable { onNavigateToTrade() }
+                    .testTag("cockpit_jump_to_trade_card")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            color = GoldPrimary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                    contentDescription = null,
+                                    tint = GoldBright,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "SIAP EKSEKUSI DI METATRADER 5?",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Buka Tiket Order, Lot Calculator & Safety Gate",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextPrimary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    Surface(
+                        color = GoldPrimary,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "BUKA TIKET →",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ObsidianBg,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
                     }
                 }
             }

@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -82,6 +83,7 @@ import kotlin.math.abs
 fun TradeSignalScreen(
     analysis: CompleteHubAnalysis,
     selectedProvider: OnlineDataProvider,
+    onNavigateToChart: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val symbol = analysis.symbol
@@ -147,6 +149,49 @@ fun TradeSignalScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }
+
+        // SHORTCUT INTEGRASI WORKSPACE COCKPIT: KEMBALI KE GRAFIK
+        item {
+            Surface(
+                color = SlateSurfaceElevated,
+                shape = RoundedCornerShape(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SlateCardBorder, RoundedCornerShape(10.dp))
+                    .clickable { onNavigateToChart() }
+                    .padding(10.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CandlestickChart,
+                            contentDescription = null,
+                            tint = CyanSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Kembali ke Grafik & Analisis Anatomi Candle",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanSecondary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        text = "LIHAT GRAFIK →",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = GoldBright,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
 
         // 1. HEADER SINKRONISASI FEED & KEJURUAN DATA PROVIDER
         item {
@@ -704,26 +749,95 @@ fun TradeSignalScreen(
             }
         }
 
-        // 4. CHECKLIST KONFLUENSI MESIN PENDUKUNG
+        // 4. PRE-FLIGHT EXECUTION SAFETY GATE & AUDIT KONFLUENSI
         item {
+            val passedCount = analysis.confluenceChecklist.count { it.second }
+            val totalCount = analysis.confluenceChecklist.size
+            val isHighProb = passedCount >= 5
+            val isModerate = passedCount in 3..4
+            val gateColor = when {
+                isHighProb -> BullishEmerald
+                isModerate -> NeutralAmber
+                else -> BearishCrimson
+            }
+            val gateBadgeText = when {
+                isHighProb -> "SIAP EKSEKUSI MT5 (VERIFIED)"
+                isModerate -> "SELEKTIF • KURANGI LOT"
+                else -> "FILTER AKTIF • JANGAN ENTRY"
+            }
+            val gateAdvice = when {
+                isHighProb -> "✓ 5+ Kriteria Terpenuhi: Konfluensi kuantitatif memenuhi standar institusi berprobabilitas tinggi."
+                isModerate -> "⚠️ Konfluensi Moderat: Disarankan kurangi lot 50% atau tunggu retest level Support/Resistance."
+                else -> "🛑 Konfluensi Lemah: Pasar rawan sideways / pembalikan mendadak. Lindungi modal Anda."
+            }
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, SlateCardBorder, RoundedCornerShape(16.dp))
+                    .border(1.2.dp, gateColor.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+                    .testTag("preflight_safety_gate_card")
             ) {
                 Column(
                     modifier = Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "AUDIT 7 KRITERIA KONFLUENSI EKSEKUSI [CANDLE 1]:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = CyanSecondary,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "PRE-FLIGHT SAFETY GATE",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Pemeriksaan Disiplin $passedCount/$totalCount Kriteria Sebelum Entry",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Surface(
+                            color = gateColor.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.border(1.dp, gateColor.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                        ) {
+                            Text(
+                                text = gateBadgeText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = gateColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
 
+                    // Progress Gate Bar
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        LinearProgressIndicator(
+                            progress = { (passedCount.toFloat() / totalCount.toFloat()).coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = gateColor,
+                            trackColor = SlateCardBorder
+                        )
+                        Text(
+                            text = gateAdvice,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = gateColor,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    HorizontalDivider(color = SlateCardBorder)
+
+                    // Daftar 7 Kriteria
                     analysis.confluenceChecklist.forEach { (criterion, passed) ->
                         Row(
                             modifier = Modifier
@@ -749,7 +863,8 @@ fun TradeSignalScreen(
                             Text(
                                 text = criterion,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (passed) TextPrimary else TextSecondary
+                                color = if (passed) TextPrimary else TextSecondary,
+                                fontWeight = if (passed) FontWeight.Medium else FontWeight.Normal
                             )
                         }
                     }

@@ -156,7 +156,7 @@ class LiveMarketAndNewsService(
         return when (provider) {
             OnlineDataProvider.ELEV8_METAAPI -> {
                 val region = discoveredMetaApiRegion ?: getMetaApiRegion()
-                val accId = getMetaApiAccountId().ifEmpty { "YOUR_METAAPI_ACCOUNT_ID" }
+                val accId = getMetaApiAccountId().ifEmpty { "ACCOUNT_ID" }
                 val symWithSuffix = discoveredElev8Symbol[symbol] ?: getElev8SymbolWithSuffix(symbol)
                 "https://mt-market-data-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$accId/historical-market-data/symbols/$symWithSuffix/timeframes/${timeframe.binanceInterval}/candles?limit=500"
             }
@@ -258,13 +258,11 @@ class LiveMarketAndNewsService(
     }
 
     fun getMetaApiAccountId(): String {
-        customMetaApiAccountId?.let { if (it.isNotBlank()) return it }
-        return runCatching { BuildConfig.METAAPI_ACCOUNT_ID.trim() }.getOrDefault("")
+        return customMetaApiAccountId?.trim().orEmpty()
     }
 
     fun getMetaApiAuthToken(): String {
-        customMetaApiAuthToken?.let { if (it.isNotBlank()) return it }
-        return runCatching { BuildConfig.METAAPI_AUTH_TOKEN.trim() }.getOrDefault("")
+        return customMetaApiAuthToken?.trim().orEmpty()
     }
 
     fun getMetaApiRegion(): String {

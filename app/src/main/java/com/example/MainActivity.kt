@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
@@ -64,7 +65,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.HubRepository
@@ -94,6 +97,16 @@ import com.example.ui.theme.SlateSurface
 import com.example.ui.theme.SlateSurfaceElevated
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+
+enum class AppPillar(
+    val title: String,
+    val subtitle: String,
+    val defaultTab: HubTab
+) {
+    COCKPIT("Cockpit", "Grafik & Eksekusi", HubTab.HUD_CHART),
+    RADAR("Radar", "MTF & Berita", HubTab.MTF_MATRIX),
+    STUDIO("Studio", "Mesin & Sistem", HubTab.ENGINES)
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -187,64 +200,78 @@ fun HubSmartPatternApp() {
         containerColor = ObsidianBg,
         contentWindowInsets = WindowInsets.safeDrawing,
         bottomBar = {
+            val currentPillar = when (uiState.selectedTab) {
+                HubTab.HUD_CHART, HubTab.TRADE -> AppPillar.COCKPIT
+                HubTab.MTF_MATRIX, HubTab.NEWS_ENGINE -> AppPillar.RADAR
+                HubTab.ENGINES, HubTab.MQL5_STUDIO, HubTab.SETTINGS -> AppPillar.STUDIO
+            }
+
             Surface(
                 color = SlateSurface,
-                tonalElevation = 6.dp,
-                shadowElevation = 12.dp,
+                tonalElevation = 8.dp,
+                shadowElevation = 16.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .border(
                         width = 1.dp,
-                        color = SlateCardBorder.copy(alpha = 0.7f)
+                        color = SlateCardBorder.copy(alpha = 0.8f)
                     )
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    HubTab.entries.forEach { tab ->
-                        val isSelected = uiState.selectedTab == tab
-                        val icon = when (tab) {
-                            HubTab.HUD_CHART -> Icons.Default.CandlestickChart
-                            HubTab.TRADE -> Icons.AutoMirrored.Filled.TrendingUp
-                            HubTab.ENGINES -> Icons.Default.Analytics
-                            HubTab.MTF_MATRIX -> Icons.Default.Layers
-                            HubTab.NEWS_ENGINE -> Icons.Default.Newspaper
-                            HubTab.MQL5_STUDIO -> Icons.Default.Code
-                            HubTab.SETTINGS -> Icons.Default.Settings
+                    AppPillar.entries.forEach { pillar ->
+                        val isSelected = currentPillar == pillar
+                        val icon = when (pillar) {
+                            AppPillar.COCKPIT -> Icons.Default.CandlestickChart
+                            AppPillar.RADAR -> Icons.Default.Layers
+                            AppPillar.STUDIO -> Icons.Default.Analytics
                         }
 
-                        Box(
+                        Surface(
+                            color = if (isSelected) GoldPrimary else SlateSurfaceElevated.copy(alpha = 0.45f),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(
-                                    if (isSelected) GoldPrimary else SlateSurfaceElevated.copy(alpha = 0.5f)
-                                )
-                                .clickable { viewModel.selectTab(tab) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp)
-                                .testTag("nav_tab_${tab.name.lowercase()}"),
-                            contentAlignment = Alignment.Center
+                                .weight(1f)
+                                .padding(horizontal = 4.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { viewModel.selectTab(pillar.defaultTab) }
+                                .testTag("nav_pillar_${pillar.name.lowercase()}")
                         ) {
                             Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
                                     imageVector = icon,
-                                    contentDescription = tab.title,
+                                    contentDescription = pillar.title,
                                     tint = if (isSelected) ObsidianBg else TextSecondary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Text(
-                                    text = tab.title,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (isSelected) ObsidianBg else TextSecondary,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Column {
+                                    Text(
+                                        text = pillar.title,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = if (isSelected) ObsidianBg else TextPrimary,
+                                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        text = pillar.subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isSelected) ObsidianBg.copy(alpha = 0.8f) else TextSecondary,
+                                        fontSize = 9.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -293,6 +320,71 @@ fun HubSmartPatternApp() {
             }
 
             val analysis = uiState.analysis
+
+            // Pilar Sub-Tabs Workspace Switcher (Hanya ditampilkan bila data online aktif)
+            val currentPillar = when (uiState.selectedTab) {
+                HubTab.HUD_CHART, HubTab.TRADE -> AppPillar.COCKPIT
+                HubTab.MTF_MATRIX, HubTab.NEWS_ENGINE -> AppPillar.RADAR
+                HubTab.ENGINES, HubTab.MQL5_STUDIO, HubTab.SETTINGS -> AppPillar.STUDIO
+            }
+
+            if (analysis != null && uiState.isProviderOnline && !uiState.isLoading) {
+                val subTabs = when (currentPillar) {
+                    AppPillar.COCKPIT -> listOf(
+                        HubTab.HUD_CHART to "📈 Grafik & Sinyal",
+                        HubTab.TRADE to "🎯 Tiket Eksekusi MT5"
+                    )
+                    AppPillar.RADAR -> listOf(
+                        HubTab.MTF_MATRIX to "🧭 Matriks 5-Timeframe",
+                        HubTab.NEWS_ENGINE to "📰 Berita Makro & Kalender"
+                    )
+                    AppPillar.STUDIO -> listOf(
+                        HubTab.ENGINES to "⚙️ 10 Mesin Analisis",
+                        HubTab.MQL5_STUDIO to "💻 Generator MQL5 MT5",
+                        HubTab.SETTINGS to "🛡️ Server & Pengaturan"
+                    )
+                }
+
+                Surface(
+                    color = SlateSurface,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, SlateCardBorder)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        subTabs.forEach { (tab, label) ->
+                            val isTabActive = uiState.selectedTab == tab
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isTabActive) GoldPrimary else SlateSurfaceElevated.copy(alpha = 0.5f))
+                                    .clickable { viewModel.selectTab(tab) }
+                                    .padding(vertical = 8.dp)
+                                    .testTag("nav_tab_${tab.name.lowercase()}"),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isTabActive) ObsidianBg else TextSecondary,
+                                    fontWeight = if (isTabActive) FontWeight.Bold else FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             when {
                 uiState.isLoading -> {
                     Box(
@@ -357,12 +449,14 @@ fun HubSmartPatternApp() {
                             onUpdateMetaApiAccountId = viewModel::updateMetaApiAccountIdInput,
                             onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
                             onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
-                            onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials
+                            onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials,
+                            onNavigateToTrade = { viewModel.selectTab(HubTab.TRADE) }
                         )
 
                         HubTab.TRADE -> TradeSignalScreen(
                             analysis = analysis,
-                            selectedProvider = uiState.selectedProvider
+                            selectedProvider = uiState.selectedProvider,
+                            onNavigateToChart = { viewModel.selectTab(HubTab.HUD_CHART) }
                         )
 
                         HubTab.ENGINES -> TenEnginesScreen(

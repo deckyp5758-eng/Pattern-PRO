@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -46,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.CompleteHubAnalysis
 import com.example.model.MarketSymbol
 import com.example.model.NewsImpactLevel
@@ -230,7 +232,7 @@ fun MtfMatrixScreen(
             }
         }
 
-        // 2. TABEL KOMPARASI CEPAT MATRIKS (QUICK MATRIX COMPARISON GRID)
+        // 2. RADAR HEATMAP 5-TIMEFRAME (COMPACT NO-SCROLL GRID)
         item {
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
@@ -241,106 +243,120 @@ fun MtfMatrixScreen(
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "TABEL KOMPARASI LENGKAP 5 TIMEFRAME:",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = GoldBright
-                    )
-
-                    val scrollState = rememberScrollState()
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(scrollState)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            // Header Row
-                            Row(
-                                modifier = Modifier
-                                    .background(SlateSurfaceElevated, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(16.dp)
-                            ) {
-                                Text("TF", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(36.dp))
-                                Text("BIAS", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(60.dp))
-                                Text("TREN EMA", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(110.dp))
-                                Text("STRUKTUR", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(120.dp))
-                                Text("RSI(14)", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(50.dp))
-                                Text("ADX(14)", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(50.dp))
-                                Text("POLA CANDLE [1]", style = MaterialTheme.typography.labelSmall, color = GoldBright, modifier = Modifier.width(130.dp))
+                        Text(
+                            text = "RADAR HEATMAP 5-TIMEFRAME",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = GoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Ketuk TF untuk Beralih",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanSecondary
+                        )
+                    }
+
+                    // Grid 5 Kolom pas 100% lebar layar HP tanpa geser kiri-kanan
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        mtf.rows.forEach { row ->
+                            val isCurrentTf = row.timeframe == analysis.activeTimeframe
+                            val biasColor = when (row.bias) {
+                                PatternBias.BULLISH -> BullishEmerald
+                                PatternBias.BEARISH -> BearishCrimson
+                                PatternBias.NEUTRAL -> NeutralAmber
                             }
 
-                            mtf.rows.forEach { row ->
-                                val isCurrentTf = row.timeframe == analysis.activeTimeframe
-                                val biasColor = when (row.bias) {
-                                    PatternBias.BULLISH -> BullishEmerald
-                                    PatternBias.BEARISH -> BearishCrimson
-                                    PatternBias.NEUTRAL -> NeutralAmber
-                                }
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isCurrentTf) SlateSurfaceElevated else ObsidianBg)
+                                    .border(
+                                        width = if (isCurrentTf) 1.5.dp else 1.dp,
+                                        color = if (isCurrentTf) GoldPrimary else SlateCardBorder,
+                                        shape = RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable { onSelectTimeframe(row.timeframe) }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // TF Header
+                                Text(
+                                    text = row.timeframe.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isCurrentTf) GoldBright else TextPrimary,
+                                    fontWeight = FontWeight.Bold
+                                )
 
-                                Row(
+                                // Bias Block
+                                Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(if (isCurrentTf) GoldPrimary.copy(alpha = 0.12f) else SlateSurfaceElevated.copy(alpha = 0.4f))
-                                        .clickable { onSelectTimeframe(row.timeframe) }
-                                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(biasColor.copy(alpha = 0.2f))
+                                        .border(0.5.dp, biasColor, RoundedCornerShape(4.dp))
+                                        .padding(vertical = 3.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = "${row.timeframe.label}${if (isCurrentTf) "*" else ""}",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (isCurrentTf) GoldBright else TextPrimary,
-                                        fontWeight = if (isCurrentTf) FontWeight.Bold else FontWeight.Normal,
-                                        modifier = Modifier.width(36.dp)
-                                    )
-                                    Text(
-                                        text = row.bias.label.take(7),
+                                        text = when (row.bias) {
+                                            PatternBias.BULLISH -> "BULL"
+                                            PatternBias.BEARISH -> "BEAR"
+                                            PatternBias.NEUTRAL -> "NEU"
+                                        },
                                         style = MaterialTheme.typography.labelSmall,
                                         color = biasColor,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.width(60.dp)
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 9.sp
                                     )
-                                    Text(
-                                        text = row.trend.label,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextPrimary,
-                                        modifier = Modifier.width(110.dp)
-                                    )
-                                    Text(
-                                        text = row.structure.label,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = TextPrimary,
-                                        modifier = Modifier.width(120.dp)
-                                    )
-                                    Text(
-                                        text = String.format(Locale.US, "%.1f", row.rsi14),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = CyanSecondary,
-                                        modifier = Modifier.width(50.dp)
-                                    )
-                                    Text(
-                                        text = String.format(Locale.US, "%.1f", row.adx14),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = CyanSecondary,
-                                        modifier = Modifier.width(50.dp)
-                                    )
-                                    Text(
-                                        text = row.closedPatternName,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = GoldBright,
-                                        modifier = Modifier.width(130.dp)
+                                }
+
+                                // Tren EMA Block
+                                val isTrendUp = row.trend.name.contains("BULL", ignoreCase = true) || row.trend.name.contains("UP", ignoreCase = true)
+                                Text(
+                                    text = if (isTrendUp) "▲ EMA" else "▼ EMA",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isTrendUp) BullishEmerald else BearishCrimson,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                // RSI Value
+                                Text(
+                                    text = "RSI ${row.rsi14.toInt()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (row.rsi14 >= 70) BearishCrimson else if (row.rsi14 <= 30) BullishEmerald else CyanSecondary,
+                                    fontSize = 9.sp
+                                )
+
+                                if (isCurrentTf) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(5.dp)
+                                            .clip(CircleShape)
+                                            .background(GoldPrimary)
                                     )
                                 }
                             }
                         }
                     }
+
                     Text(
-                        text = "* Ketuk baris mana saja untuk langsung beralih ke grafik timeframe tersebut.",
+                        text = "💡 Pandangan Cepat 1 Detik: Hijau seragam = Konfluensi Bullish Penuh | Merah seragam = Konfluensi Bearish Penuh.",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
+                        color = TextSecondary,
+                        fontSize = 10.sp
                     )
                 }
             }

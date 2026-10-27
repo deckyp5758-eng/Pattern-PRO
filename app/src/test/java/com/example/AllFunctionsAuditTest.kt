@@ -16,6 +16,7 @@ import com.example.model.OnlineDataProvider
 import com.example.model.SrInteractionType
 import com.example.model.SwingLabel
 import com.example.model.Timeframe
+import com.example.data.remote.LiveMarketAndNewsService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -349,5 +350,130 @@ class AllFunctionsAuditTest {
         assertTrue(timeframes.contains(Timeframe.M15))
         assertTrue(timeframes.contains(Timeframe.M30))
         assertTrue(timeframes.contains(Timeframe.H1))
+    }
+
+    // ==========================================
+    // AUDIT 7: Risk vs Reward & Proyeksi Target
+    // ==========================================
+    @Test
+    fun audit_riskRewardCalculations_bullishAndBearish() {
+        val bullBars = generateBullishSeries(100)
+        val tfMap = Timeframe.entries.associateWith { bullBars }
+        val bullAnalysis = IndicatorAndConfluenceEngines.buildCompleteAnalysis(
+            symbol = MarketSymbol.XAUUSD,
+            brokerSuffix = "",
+            activeTimeframe = Timeframe.M15,
+            activeBars = bullBars,
+            allTimeframeBars = tfMap,
+            isLiveFeed = true,
+            feedSourceName = "RR Bullish Audit",
+            newsArticles = emptyList(),
+            isLiveRss = false
+        )
+
+        val vol = bullAnalysis.volatilityEngine
+        val bar1Close = bullAnalysis.bars[1].close
+
+        // Proyeksi Bullish (Long): TP > Entry > SL
+        val bullEntry = bar1Close
+        val bullSl = vol.longStopReferencePrice
+        val bullTp1 = vol.longTarget1RPrice
+        val bullTp2 = vol.longTarget2RPrice
+
+        assertTrue("Bullish entry harus positif", bullEntry > 0.0)
+        assertTrue("Bullish SL wajib di bawah entry", bullSl < bullEntry)
+        assertTrue("Bullish TP 1R wajib di atas entry", bullTp1 > bullEntry)
+        assertTrue("Bullish TP 2R wajib di atas TP 1R", bullTp2 > bullTp1)
+
+        val bullRisk = bullEntry - bullSl
+        val bullReward = bullTp1 - bullEntry
+        val bullRatio = bullReward / bullRisk
+        assertEquals(1.5, bullRatio, 0.05)
+
+        // Proyeksi Bearish (Short): SL > Entry > TP
+        val bearSl = vol.shortStopReferencePrice
+        val bearTp1 = vol.shortTarget1RPrice
+        val bearTp2 = vol.shortTarget2RPrice
+
+        assertTrue("Bearish SL wajib di atas entry", bearSl > bullEntry)
+        assertTrue("Bearish TP 1R wajib di bawah entry", bearTp1 < bullEntry)
+        assertTrue("Bearish TP 2R wajib di bawah TP 1R", bearTp2 < bearTp1)
+
+        val bearRisk = bearSl - bullEntry
+        val bearReward = bullEntry - bearTp1
+        val bearRatio = bearReward / bearRisk
+        assertEquals(1.5, bearRatio, 0.05)
+    }
+
+    // ==========================================
+    // AUDIT 8: Volatility Breakout & Probability Zone
+    // ==========================================
+    @Test
+    fun audit_volatilityProbabilityZone_computations() {
+        val bars = generateBullishSeries(100)
+        val atr = 12.5
+        val supp = 2650.0
+        val res = 2700.0
+
+        val probReport = IndicatorAndConfluenceEngines.computeBreakoutProbability(
+            bars = bars,
+            atr14 = atr,
+            nearestSupport = supp,
+            nearestResistance = res
+        )
+
+        assertNotNull(probReport)
+        assertTrue(probReport.bullishBreakoutProbPct in 5..80)
+        assertTrue(probReport.bearishBreakdownProbPct in 5..80)
+        assertTrue(probReport.rangeBoundHoldProbPct >= 10)
+        assertTrue(probReport.distanceToResistanceAtr > 0.0)
+        assertTrue(probReport.distanceToSupportAtr > 0.0)
+        assertTrue(probReport.primaryBreakoutRisk.isNotBlank())
+        assertEquals(25, probReport.recentVolatilityPoints.size)
+
+        // Pastikan batas pita atas >= harga tutup >= batas pita bawah pada titik volatilitas
+        probReport.recentVolatilityPoints.forEach { pt ->
+            assertTrue(pt.upperVolBand >= pt.closePrice)
+            assertTrue(pt.closePrice >= pt.lowerVolBand)
+            assertTrue(pt.historicalVolatility > 0.0)
+        }
+    }
+
+    // ==========================================
+    // AUDIT 9: Multi-Provider & MetaApi Credential Isolation
+    // ==========================================
+    @Test
+    fun audit_metaApiCredentialsAndProviderUrls() {
+        val service = LiveMarketAndNewsService()
+
+        // 1. Awalnya harus bersih tanpa token default yang ter-bake
+        assertEquals("", service.getMetaApiAccountId())
+        assertEquals("", service.getMetaApiAuthToken())
+        assertFalse(service.isMetaApiConfigured())
+
+        // 2. Saat kredensial dimasukkan manual
+        service.setCustomMetaApiCredentials("user-acc-12345", "user-token-secret-xyz")
+        assertEquals("user-acc-12345", service.getMetaApiAccountId())
+        assertEquals("user-token-secret-xyz", service.getMetaApiAuthToken())
+        assertTrue(service.isMetaApiConfigured())
+
+        // 3. Saat kredensial dihapus
+        service.clearCustomMetaApiCredentials()
+        assertEquals("", service.getMetaApiAccountId())
+        assertEquals("", service.getMetaApiAuthToken())
+        assertFalse(service.isMetaApiConfigured())
+
+        // 4. Verifikasi URL provider open online (Binance Vision, Yahoo Finance, Kraken Spot)
+        val binanceUrl = service.buildProviderUrl(MarketSymbol.XAUUSD, Timeframe.M15, OnlineDataProvider.BINANCE_VISION)
+        assertTrue(binanceUrl.contains("data-api.binance.vision"))
+        assertTrue(binanceUrl.contains("PAXGUSDT"))
+
+        val yahooEurUrl = service.buildProviderUrl(MarketSymbol.EURUSD, Timeframe.H1, OnlineDataProvider.YAHOO_FINANCE)
+        assertTrue(yahooEurUrl.contains("query1.finance.yahoo.com"))
+        assertTrue(yahooEurUrl.contains("EURUSD=X"))
+
+        val krakenUrl = service.buildProviderUrl(MarketSymbol.XAUUSD, Timeframe.M5, OnlineDataProvider.KRAKEN_SPOT)
+        assertTrue(krakenUrl.contains("api.kraken.com"))
+        assertTrue(krakenUrl.contains("PAXGUSD"))
     }
 }
