@@ -57,6 +57,16 @@ enum class OnlineDataProvider(
         isOfflineTestMode = true
     );
 
+    val isBrokerNativeFeed: Boolean
+        get() = this == ELEV8_METAAPI
+
+    val feedQualityLabel: String
+        get() = if (this == ELEV8_METAAPI) {
+            "Feed Broker MT5 (Real/Demo)"
+        } else {
+            "Feed Proxy Pasar (Spot/Futures)"
+        }
+
     companion object {
         val realProviders = listOf(
             ELEV8_METAAPI,

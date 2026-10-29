@@ -22,6 +22,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import kotlin.math.sin
 
 /**
@@ -33,6 +36,8 @@ import kotlin.math.sin
  * 5. Diagnostic Guard & Validasi Anomali Data
  * 6. Model Simbol & Timeframe Multi-Instrumen (XAUUSD & EURUSD)
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class AllFunctionsAuditTest {
 
     private fun generateBullishSeries(count: Int = 300): List<Mt5RateBar> {
@@ -475,5 +480,210 @@ class AllFunctionsAuditTest {
         val krakenUrl = service.buildProviderUrl(MarketSymbol.XAUUSD, Timeframe.M5, OnlineDataProvider.KRAKEN_SPOT)
         assertTrue(krakenUrl.contains("api.kraken.com"))
         assertTrue(krakenUrl.contains("PAXGUSD"))
+    }
+
+    // ==========================================
+    // AUDIT 10: Replay Non-Repaint Multi-Candle Cycle
+    // ==========================================
+    @Test
+    fun audit_replayNonRepaint_closedCandleSignalIntegrity() {
+        val baseBars = generateBullishSeries(120)
+        val tfMap = Timeframe.entries.associateWith { baseBars }
+        val analysisAtTimeT = IndicatorAndConfluenceEngines.buildCompleteAnalysis(
+            symbol = MarketSymbol.XAUUSD,
+            brokerSuffix = "",
+            activeTimeframe = Timeframe.M15,
+            activeBars = baseBars,
+            allTimeframeBars = tfMap,
+            isLiveFeed = true,
+            feedSourceName = "Replay Time T",
+            newsArticles = emptyList(),
+            isLiveRss = false
+        )
+
+        val bar1AtT = analysisAtTimeT.bars[1]
+        val verdictAtT = analysisAtTimeT.verdict
+        val volAtT = analysisAtTimeT.volatilityEngine
+        val entryAtT = bar1AtT.close
+        val slAtT = volAtT.longStopReferencePrice
+        val tp1AtT = volAtT.longTarget1RPrice
+
+        // Simulasikan candle [0] yang bergerak-gerak (fluktuasi tick berjalan)
+        val fluctuatingTickBars = baseBars.toMutableList().apply {
+            val forming0 = this[0]
+            this[0] = forming0.copy(
+                high = forming0.high + 5.0,
+                low = forming0.low - 3.0,
+                close = forming0.close + 2.0,
+                tickVolume = forming0.tickVolume + 150
+            )
+        }
+        val tfFluctuating = Timeframe.entries.associateWith { fluctuatingTickBars }
+        val analysisDuringTick = IndicatorAndConfluenceEngines.buildCompleteAnalysis(
+            symbol = MarketSymbol.XAUUSD,
+            brokerSuffix = "",
+            activeTimeframe = Timeframe.M15,
+            activeBars = fluctuatingTickBars,
+            allTimeframeBars = tfFluctuating,
+            isLiveFeed = true,
+            feedSourceName = "Replay Tick Fluctuating",
+            newsArticles = emptyList(),
+            isLiveRss = false
+        )
+
+        // Verifikasi bahwa fluktuasi candle [0] SAMA SEKALI TIDAK MENGUBAH metrik candle [1]
+        val bar1DuringTick = analysisDuringTick.bars[1]
+        assertEquals(bar1AtT.timeEpochSec, bar1DuringTick.timeEpochSec)
+        assertEquals(bar1AtT.open, bar1DuringTick.open, 0.0001)
+        assertEquals(bar1AtT.high, bar1DuringTick.high, 0.0001)
+        assertEquals(bar1AtT.low, bar1DuringTick.low, 0.0001)
+        assertEquals(bar1AtT.close, bar1DuringTick.close, 0.0001)
+        assertEquals(verdictAtT, analysisDuringTick.verdict)
+        assertEquals(entryAtT, analysisDuringTick.bars[1].close, 0.0001)
+        assertEquals(slAtT, analysisDuringTick.volatilityEngine.longStopReferencePrice, 0.0001)
+        assertEquals(tp1AtT, analysisDuringTick.volatilityEngine.longTarget1RPrice, 0.0001)
+
+        // Verifikasi tanda tangan kunci Non-Repaint (Hash Lock)
+        val hashBefore = SystemDiagnosticGuard.computeClosedBar1Signature(MarketSymbol.XAUUSD, Timeframe.M15, bar1AtT)
+        val hashAfter = SystemDiagnosticGuard.computeClosedBar1Signature(MarketSymbol.XAUUSD, Timeframe.M15, bar1DuringTick)
+        assertEquals(hashBefore, hashAfter)
+    }
+
+    // ==========================================
+    // AUDIT 11: Dataset Sideways, Flat Prices, dan Volatilitas Ekstrem
+    // ==========================================
+    @Test
+    fun audit_sidewaysFlatPricesAndExtremeVolatility() {
+        // 1. Data Datar / Flat Line (Gains = 0, Losses = 0)
+        val flatBars = (0 until 60).map { idx ->
+            Mt5RateBar(
+                barIndex = idx,
+                timeEpochSec = 1727000000L - idx * 900L,
+                open = 2650.0,
+                high = 2650.0,
+                low = 2650.0,
+                close = 2650.0,
+                tickVolume = 500L,
+                realVolume = 5000L,
+                spread = 15
+            )
+        }
+        val momFlat = IndicatorAndConfluenceEngines.runMomentumEngine(flatBars)
+        // Pada harga datar sempurna, RSI harus 50.0 (seimbang / netral equilibrium), bukan 100.0
+        assertEquals(50.0, momFlat.rsi14, 0.001)
+
+        // 2. Data Volatilitas Ekstrem (Lonjakan 10x ATR)
+        val extremeBars = generateBullishSeries(80).toMutableList().apply {
+            val b1 = this[1]
+            this[1] = b1.copy(high = b1.close + 120.0, low = b1.close - 120.0)
+        }
+        val volExtreme = IndicatorAndConfluenceEngines.runVolatilityEngine(extremeBars, MarketSymbol.XAUUSD)
+        assertNotNull(volExtreme.warningMessage)
+        assertTrue(volExtreme.warningMessage!!.contains("VOLATILITAS"))
+    }
+
+    // ==========================================
+    // AUDIT 12: Data Kosong, Inversi, dan Anomali Nilai
+    // ==========================================
+    @Test
+    fun audit_emptyAndCorruptedDataHandling() {
+        // 1. Data Kosong
+        val (isEmptyValid, emptyNotes) = SystemDiagnosticGuard.validateRateSeries(
+            MarketSymbol.XAUUSD,
+            Timeframe.M15,
+            emptyList()
+        )
+        assertFalse(isEmptyValid)
+        assertTrue(emptyNotes.any { it.contains("kosong") })
+
+        // 2. Data dengan NaN / Tak Hingga
+        val validBars = generateBullishSeries(60)
+        val nanBars = validBars.toMutableList().apply {
+            this[2] = this[2].copy(close = Double.NaN)
+        }
+        val (isNanValid, nanNotes) = SystemDiagnosticGuard.validateRateSeries(
+            MarketSymbol.XAUUSD,
+            Timeframe.M15,
+            nanBars
+        )
+        assertFalse(isNanValid)
+        assertTrue(nanNotes.any { it.contains("non-positif, NaN, atau tak hingga") || it.contains("Anomali") })
+    }
+
+    // ==========================================
+    // AUDIT 13: ADX & Indicator Warmup Reference
+    // ==========================================
+    @Test
+    fun audit_adxWarmupReference_returnsZeroWithoutTrend() {
+        // Kurang dari 28 candle (belum cukup pemanasan Wilder RMA TR & DX)
+        val shortSeries = generateBullishSeries(15)
+        val momShort = IndicatorAndConfluenceEngines.runMomentumEngine(shortSeries)
+        // ADX harus 0.0 (tidak ada tren terkonfirmasi palsu), bukan hardcoded 25.0
+        assertEquals(0.0, momShort.adx14, 0.001)
+        assertFalse(momShort.isTrendStrengthConfirmed)
+    }
+
+    // ==========================================
+    // AUDIT 14: Multi-Timeframe Incompleteness Protection
+    // ==========================================
+    @Test
+    fun audit_multiTimeframeIncompletenessProtection() {
+        val barsM1 = generateBullishSeries(100)
+        // Simulasi hanya M1 yang tersedia, H1 dan M15 hilang/belum diunduh
+        val incompleteTfMap = mapOf(Timeframe.M1 to barsM1)
+
+        val mtfReport = IndicatorAndConfluenceEngines.runMultiTimeframeEngine(
+            MarketSymbol.XAUUSD,
+            incompleteTfMap
+        )
+
+        // Tanpa H1 & M15, bias HTF wajib NEUTRAL (tidak boleh mengklaim BULLISH atau BEARISH)
+        assertEquals(com.example.model.PatternBias.NEUTRAL, mtfReport.htfBias)
+        assertTrue(mtfReport.executiveConclusion.contains("belum lengkap") || mtfReport.executiveConclusion.contains("Netral"))
+    }
+
+    // ==========================================
+    // AUDIT 15: Feed Distinction & Notification Anti-Duplicate
+    // ==========================================
+    @Test
+    fun audit_feedQualityAndNotificationGuard() {
+        // 1. Verifikasi pemisahan tegas antara Feed Broker Asli dan Feed Proxy Pasar
+        assertTrue(OnlineDataProvider.ELEV8_METAAPI.isBrokerNativeFeed)
+        assertFalse(OnlineDataProvider.BINANCE_VISION.isBrokerNativeFeed)
+        assertFalse(OnlineDataProvider.YAHOO_FINANCE.isBrokerNativeFeed)
+        assertFalse(OnlineDataProvider.KRAKEN_SPOT.isBrokerNativeFeed)
+
+        assertTrue(OnlineDataProvider.ELEV8_METAAPI.feedQualityLabel.contains("Broker MT5"))
+        assertTrue(OnlineDataProvider.BINANCE_VISION.feedQualityLabel.contains("Proxy"))
+
+        // 2. Verifikasi Notification Helper menolak harga NaN atau non-positif
+        val mockContext = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+        val rejectNanResult = com.example.util.TradeNotificationHelper.sendTradeSignalNotification(
+            context = mockContext,
+            provider = OnlineDataProvider.ELEV8_METAAPI,
+            symbol = MarketSymbol.XAUUSD,
+            timeframe = Timeframe.M15,
+            bar1EpochSec = 1727000900L,
+            verdict = AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+            entryPrice = Double.NaN,
+            stopLossPrice = 2600.0,
+            target1Price = 2700.0,
+            target2Price = 2750.0
+        )
+        assertFalse("Notifikasi wajib ditolak jika harga NaN", rejectNanResult)
+
+        val rejectZeroResult = com.example.util.TradeNotificationHelper.sendTradeSignalNotification(
+            context = mockContext,
+            provider = OnlineDataProvider.ELEV8_METAAPI,
+            symbol = MarketSymbol.XAUUSD,
+            timeframe = Timeframe.M15,
+            bar1EpochSec = 1727000900L,
+            verdict = AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+            entryPrice = 0.0,
+            stopLossPrice = 2600.0,
+            target1Price = 2700.0,
+            target2Price = 2750.0
+        )
+        assertFalse("Notifikasi wajib ditolak jika harga nol atau non-positif", rejectZeroResult)
     }
 }

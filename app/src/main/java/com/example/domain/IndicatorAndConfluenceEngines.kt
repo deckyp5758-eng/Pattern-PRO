@@ -314,14 +314,19 @@ object IndicatorAndConfluenceEngines {
         val htfRows = rows.filter { it.timeframe in listOf(Timeframe.H1, Timeframe.M30, Timeframe.M15) }
         val ltfRows = rows.filter { it.timeframe in listOf(Timeframe.M5, Timeframe.M1) }
 
+        val hasH1 = rows.any { it.timeframe == Timeframe.H1 }
+        val hasM15 = rows.any { it.timeframe == Timeframe.M15 }
+        val isMtfDataComplete = hasH1 && hasM15
+
         val htfBullCount = htfRows.count { it.bias == PatternBias.BULLISH }
         val htfBearCount = htfRows.count { it.bias == PatternBias.BEARISH }
 
         val htfBias = when {
+            !isMtfDataComplete -> PatternBias.NEUTRAL // Wajib H1 & M15 lengkap untuk mengklaim konfluensi HTF
             htfBullCount >= 2 -> PatternBias.BULLISH
             htfBearCount >= 2 -> PatternBias.BEARISH
-            htfBullCount == 1 && htfBearCount == 0 -> PatternBias.BULLISH
-            htfBearCount == 1 && htfBullCount == 0 -> PatternBias.BEARISH
+            htfBullCount == 1 && htfBearCount == 0 && hasH1 -> PatternBias.BULLISH
+            htfBearCount == 1 && htfBullCount == 0 && hasH1 -> PatternBias.BEARISH
             else -> PatternBias.NEUTRAL
         }
 
@@ -332,6 +337,7 @@ object IndicatorAndConfluenceEngines {
             (htfBias == PatternBias.BEARISH && ltfBullCount >= 1 && ltfBearCount == 0)
 
         val ltfState = when {
+            !isMtfDataComplete -> "Data Timeframe Belum Lengkap"
             htfBias == PatternBias.BULLISH && isPullback -> "TF Kecil (M5/M1) Sedang Koreksi (Pullback)"
             htfBias == PatternBias.BEARISH && isPullback -> "TF Kecil (M5/M1) Sedang Koreksi Naik"
             htfBias == PatternBias.BULLISH && ltfBullCount >= 1 -> "Searah Naik (Bullish) dengan TF Besar"
@@ -340,6 +346,8 @@ object IndicatorAndConfluenceEngines {
         }
 
         val conclusion = when {
+            !isMtfDataComplete ->
+                "Data Multi-Timeframe belum lengkap (membutuhkan H1 dan M15). Konfluensi tren HTF ditahan (Netral) demi mencegah sinyal palsu."
             htfBias == PatternBias.BULLISH && isPullback ->
                 "Timeframe Besar (H1/M30/M15) Bullish (Naik), sedangkan Timeframe Kecil (M5/M1) sedang koreksi (Pullback). JANGAN langsung menyebut pembalikan arah (Reversal); tunggu konfirmasi candle tutup Higher Low (HL) di area Support."
             htfBias == PatternBias.BEARISH && isPullback ->
@@ -818,16 +826,21 @@ object IndicatorAndConfluenceEngines {
         return closes.indices.map { i ->
             val g = avgGains[i]
             val l = avgLosses[i]
-            if (l <= 1e-10) 100.0
-            else {
-                val rs = g / l
-                100.0 - (100.0 / (1.0 + rs))
+            when {
+                l <= 1e-10 && g <= 1e-10 -> 50.0 // Harga datar (flat line / zero gain & loss): RSI seimbang di 50.0
+                l <= 1e-10 -> 100.0 // Seluruh pergerakan naik (zero loss): RSI maksimal 100.0
+                g <= 1e-10 -> 0.0 // Seluruh pergerakan turun (zero gain): RSI minimal 0.0
+                else -> {
+                    val rs = g / l
+                    100.0 - (100.0 / (1.0 + rs))
+                }
             }
         }
     }
 
     private fun computeAdx14AtClosedBar1(chron: List<Mt5RateBar>): Triple<Double, Double, Double> {
-        if (chron.size < 20) return Triple(25.0, 20.0, 20.0)
+        // Wilder RMA ADX membutuhkan minimal 14 bar untuk TR/+DM/-DM dan 14 bar untuk DX smoothing = 28 bar
+        if (chron.size < 28) return Triple(0.0, 0.0, 0.0)
         val trList = ArrayList<Double>(chron.size)
         val plusDmList = ArrayList<Double>(chron.size)
         val minusDmList = ArrayList<Double>(chron.size)

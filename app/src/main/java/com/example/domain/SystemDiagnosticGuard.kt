@@ -49,6 +49,9 @@ object SystemDiagnosticGuard {
         bars: List<Mt5RateBar>
     ): Pair<Boolean, List<String>> {
         val issues = mutableListOf<String>()
+        if (bars.isEmpty()) {
+            return Pair(false, listOf("Daftar candle kosong (0 bar)!"))
+        }
         if (bars.size < 60) {
             issues.add("Jumlah candle ${symbol.code} ${timeframe.label} terlalu sedikit (${bars.size}).")
         }
@@ -74,13 +77,20 @@ object SystemDiagnosticGuard {
             issues.add("Harga Candle [1] (${bar1.close}) tidak sesuai dengan rentang wajar ${symbol.code}!")
         }
 
-        // Periksa konsistensi High/Low dan urutan waktu turun (strictly descending) pada 30 candle terbaru
-        val checkLimit = 30.coerceAtMost(bars.size)
+        // Periksa konsistensi High/Low, nilai finite/positif, dan urutan waktu turun (strictly descending)
+        val checkLimit = 50.coerceAtMost(bars.size)
         for (i in 0 until checkLimit) {
             val bar = bars[i]
+            if (bar.open.isNaN() || bar.open.isInfinite() || bar.high.isNaN() || bar.high.isInfinite() ||
+                bar.low.isNaN() || bar.low.isInfinite() || bar.close.isNaN() || bar.close.isInfinite() ||
+                bar.open <= 0.0 || bar.high <= 0.0 || bar.low <= 0.0 || bar.close <= 0.0
+            ) {
+                issues.add("Anomali OHLC pada Candle [${bar.barIndex}]: harga non-positif, NaN, atau tak hingga.")
+                break
+            }
             val maxOC = maxOf(bar.open, bar.close)
             val minOC = minOf(bar.open, bar.close)
-            if (bar.high + 1e-7 < maxOC || bar.low - 1e-7 > minOC) {
+            if (bar.high + 1e-7 < maxOC || bar.low - 1e-7 > minOC || bar.high < bar.low) {
                 issues.add("Anomali OHLC pada Candle [${bar.barIndex}]: High/Low di luar Open/Close.")
                 break
             }

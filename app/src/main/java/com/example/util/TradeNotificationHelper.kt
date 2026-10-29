@@ -67,6 +67,14 @@ object TradeNotificationHelper {
             return false // Jangan kirim notifikasi jika pasar sedang netral/pullback
         }
 
+        // Validasi integritas harga: jangan kirim notifikasi jika harga tidak valid (NaN/Infinite/non-positif)
+        if (entryPrice <= 0.0 || stopLossPrice <= 0.0 || target1Price <= 0.0 ||
+            entryPrice.isNaN() || stopLossPrice.isNaN() || target1Price.isNaN() ||
+            entryPrice.isInfinite() || stopLossPrice.isInfinite() || target1Price.isInfinite()
+        ) {
+            return false
+        }
+
         val actionText = if (isBuy) "BUY" else if (isSell) "SELL" else "UJI COBA"
         val signalKey = "${provider.id}_${symbol.code}_${timeframe.name}_${bar1EpochSec}_${verdict.name}"
 

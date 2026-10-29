@@ -19,6 +19,48 @@ import kotlin.math.abs
 object CandleAndStructureEngines {
 
     /**
+     * Menghitung deret True Range dan RMA ATR(14) historis untuk seluruh candle (indeks 0..N).
+     * Memastikan pola dan struktur historis dinilai secara murni berdasarkan volatilitas
+     * pada waktu candle tersebut terjadi (bebas look-ahead bias & non-repaint historis).
+     */
+    fun computeAtrSeriesForBars(bars: List<Mt5RateBar>, period: Int = 14): List<Double> {
+        if (bars.isEmpty()) return emptyList()
+        val chron = bars.asReversed()
+        val trList = ArrayList<Double>(chron.size)
+        for (i in chron.indices) {
+            val cur = chron[i]
+            val tr = if (i == 0) {
+                cur.high - cur.low
+            } else {
+                val prevClose = chron[i - 1].close
+                maxOf(
+                    cur.high - cur.low,
+                    abs(cur.high - prevClose),
+                    abs(cur.low - prevClose)
+                )
+            }
+            trList.add(tr)
+        }
+        val out = ArrayList<Double>(trList.size)
+        val seedCount = period.coerceAtMost(trList.size)
+        val initialSma = trList.take(seedCount).average()
+        var rma = initialSma
+        for (i in trList.indices) {
+            val v = trList[i]
+            if (i < seedCount - 1) {
+                out.add(initialSma)
+            } else if (i == seedCount - 1) {
+                rma = initialSma
+                out.add(rma)
+            } else {
+                rma = (rma * (period - 1) + v) / period.toDouble()
+                out.add(rma)
+            }
+        }
+        return out.asReversed()
+    }
+
+    /**
      * 3. MESIN CANDLE (CANDLE ENGINE)
      * Hanya mengevaluasi candle yang SUDAH TUTUP / CLOSED (barIndex >= 1).
      * Candle 0 diabaikan untuk sinyal final agar 100% NON-REPAINT.
@@ -48,10 +90,12 @@ object CandleAndStructureEngines {
             else -> CandleAnatomyType.BEARISH
         }
 
+        val atrSeries = computeAtrSeriesForBars(bars, 14)
         val allClosedDetections = mutableListOf<DetectedPattern>()
         val maxIndex = (bars.size - 8).coerceAtMost(32)
         for (idx in 1..maxIndex) {
-            val detectedAtIdx = detect15PatternsAtClosedIndex(bars, idx, atr14)
+            val historicalAtr = atrSeries.getOrElse(idx) { atr14 }
+            val detectedAtIdx = detect15PatternsAtClosedIndex(bars, idx, historicalAtr)
             allClosedDetections.addAll(detectedAtIdx)
         }
 
@@ -394,12 +438,15 @@ object CandleAndStructureEngines {
             }
         }
 
-        // Filter kaki struktur bergantian (High <-> Low) dengan deviasi minimal 0.60 * ATR14
+        val atrSeries = computeAtrSeriesForBars(bars, 14)
+
+        // Filter kaki struktur bergantian (High <-> Low) dengan deviasi minimal 0.60 * ATR pada waktu candle tersebut
         // agar koreksi kecil di dalam tren kuat tidak membalik pembacaan HH/HL vs LH/LL
-        val minSwingLeg = (atr14 * 0.60).coerceAtLeast(1e-6)
         val alternatingSwings = mutableListOf<RawCandidate>()
 
         for (cand in candidatesChronological) {
+            val candAtr = atrSeries.getOrElse(cand.bar.barIndex) { atr14 }
+            val minSwingLeg = (candAtr * 0.60).coerceAtLeast(1e-6)
             val last = alternatingSwings.lastOrNull()
             if (last == null) {
                 alternatingSwings.add(cand)
@@ -424,10 +471,11 @@ object CandleAndStructureEngines {
         var prevLowPrice: Double? = null
 
         for (item in alternatingSwings) {
+            val itemAtr = atrSeries.getOrElse(item.bar.barIndex) { atr14 }
             if (item.isHigh) {
                 val lbl = when {
                     prevHighPrice == null -> SwingLabel.SH
-                    item.price >= prevHighPrice!! - (atr14 * 0.04) -> SwingLabel.HH
+                    item.price >= prevHighPrice!! - (itemAtr * 0.04) -> SwingLabel.HH
                     else -> SwingLabel.LH
                 }
                 prevHighPrice = item.price
@@ -442,7 +490,7 @@ object CandleAndStructureEngines {
             } else {
                 val lbl = when {
                     prevLowPrice == null -> SwingLabel.SL
-                    item.price >= prevLowPrice!! - (atr14 * 0.04) -> SwingLabel.HL
+                    item.price >= prevLowPrice!! - (itemAtr * 0.04) -> SwingLabel.HL
                     else -> SwingLabel.LL
                 }
                 prevLowPrice = item.price
@@ -699,7 +747,7 @@ object CandleAndStructureEngines {
         }
 
         val bar1 = bars[1]
-        val minGapThreshold = atr14 * 0.15 // Filter gap mikro/noise
+        val atrSeries = computeAtrSeriesForBars(bars, 14)
         val detectedFvgs = mutableListOf<com.example.model.FairValueGap>()
         val detectedObs = mutableListOf<com.example.model.OrderBlock>()
 
@@ -709,6 +757,7 @@ object CandleAndStructureEngines {
             val candleCurrent = bars[i]
             val candleMiddle = bars[i + 1]
             val candlePrior = bars[i + 2]
+            val minGapThreshold = (atrSeries.getOrElse(i) { atr14 }) * 0.15 // Filter gap mikro/noise berdasarkan ATR waktu itu
 
             // Bullish FVG: Low candle i > High candle i+2 (candle middle naik impulsif)
             if (candleCurrent.low > candlePrior.high + minGapThreshold && candleMiddle.isBullish) {
