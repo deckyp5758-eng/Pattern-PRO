@@ -6,8 +6,7 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="."/>
+    <exclude domain="sharedpref" path="hub_secure_credentials.xml"/>
+    <exclude domain="sharedpref" path="hub_trader_user_prefs.xml"/>
 </full-backup-content>

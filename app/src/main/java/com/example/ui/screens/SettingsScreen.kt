@@ -53,13 +53,32 @@ import com.example.ui.theme.SlateSurface
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Switch
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import com.example.data.remote.LiveMarketAndNewsService
+import com.example.ui.theme.NeutralAmber
+
 @Composable
 fun SettingsScreen(
     uiState: HubUiState,
+    onSelectProvider: (OnlineDataProvider) -> Unit = {},
     onRunMultiProviderAudit: () -> Unit,
     onCleanAndResetSession: () -> Unit,
     onUpdateGitHubRepo: (String) -> Unit,
     onCheckGitHubUpdate: () -> Unit,
+    onToggleAllowOtaDowngrade: (Boolean) -> Unit = {},
     onUpdateMetaApiAccountId: (String) -> Unit,
     onUpdateMetaApiAuthToken: (String) -> Unit,
     onSaveMetaApiCredentials: () -> Unit,
@@ -69,6 +88,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val audit = uiState.liveAudit
     val gh = uiState.githubRelease
+    var isTokenVisible by remember { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
@@ -94,6 +114,87 @@ fun SettingsScreen(
                     color = TextPrimary,
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+
+        // 0. Pemilihan Cepat Data Provider Pasar (Beralih Kapan Saja)
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, SlateCardBorder, RoundedCornerShape(16.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription = null,
+                                tint = GoldBright,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "PILIHAN DATA PROVIDER PASAR",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = if (uiState.isProviderOnline) "ONLINE" else "OFFLINE",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (uiState.isProviderOnline) BullishEmerald else BearishCrimson,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = "Aktif Saat Ini: ${uiState.selectedProvider.displayName}. Anda dapat beralih ke server publik gratis kapan saja jika kuota MetaApi habis:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OnlineDataProvider.realProviders.forEach { prov ->
+                            val isSelected = prov == uiState.selectedProvider
+                            OutlinedButton(
+                                onClick = { onSelectProvider(prov) },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) GoldPrimary.copy(alpha = 0.2f) else androidx.compose.ui.graphics.Color.Transparent
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSelected) GoldPrimary else SlateCardBorder
+                                ),
+                                modifier = Modifier.testTag("settings_provider_${prov.id}")
+                            ) {
+                                Text(
+                                    text = prov.shortLabel,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (isSelected) GoldBright else TextPrimary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -148,16 +249,31 @@ fun SettingsScreen(
                     }
 
                     Text(
-                        text = "Kredensial Anda disimpan langsung ke penyimpanan internal privat HP (SharedPreferences). Data tetap aman tersimpan saat aplikasi ditutup atau HP di-restart tanpa perlu re-build APK.",
+                        text = "Kredensial dienkripsi AES-256-GCM melalui Android Keystore pada penyimpanan privat perangkat serta dikecualikan dari backup cloud/transfer. Tidak disimpan dalam teks polos, namun perlindungan lokal tetap bergantung pada keamanan OS (tidak kebal pada perangkat root).",
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
 
+                    if (uiState.hasCustomSavedCredentials) {
+                        Text(
+                            text = "Status Tersimpan (Terenkripsi): Account ${uiState.savedMetaApiAccountIdHint} • Token ${uiState.savedMetaApiTokenHint}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = BullishEmerald,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.testTag("settings_saved_credential_hint")
+                        )
+                    }
+
                     OutlinedTextField(
                         value = uiState.metaApiAccountIdInput,
                         onValueChange = onUpdateMetaApiAccountId,
-                        label = { Text("Account ID MetaApi (Elev8)", style = MaterialTheme.typography.labelSmall) },
-                        placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
+                        label = { Text("Account ID MetaApi Baru (Elev8)", style = MaterialTheme.typography.labelSmall) },
+                        placeholder = {
+                            Text(
+                                text = if (uiState.hasCustomSavedCredentials) "Tersimpan: ${uiState.savedMetaApiAccountIdHint} (isi untuk ganti)" else "Contoh: 2f0cba6a-da2e-415f-...",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -167,8 +283,28 @@ fun SettingsScreen(
                     OutlinedTextField(
                         value = uiState.metaApiAuthTokenInput,
                         onValueChange = onUpdateMetaApiAuthToken,
-                        label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
-                        placeholder = { Text("Token dari app.metaapi.cloud/token", style = MaterialTheme.typography.labelSmall) },
+                        label = { Text("API Access Token MetaApi Baru", style = MaterialTheme.typography.labelSmall) },
+                        placeholder = {
+                            Text(
+                                text = if (uiState.hasCustomSavedCredentials) "Token tersimpan: ${uiState.savedMetaApiTokenHint} (isi untuk ganti)" else "Token dari app.metaapi.cloud/token",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        visualTransformation = if (isTokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(
+                                onClick = { isTokenVisible = !isTokenVisible },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .testTag("settings_toggle_token_visibility")
+                            ) {
+                                Icon(
+                                    imageVector = if (isTokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                    contentDescription = if (isTokenVisible) "Sembunyikan Token" else "Tampilkan Token Sementara",
+                                    tint = CyanSecondary
+                                )
+                            }
+                        },
                         singleLine = true,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -290,10 +426,53 @@ fun SettingsScreen(
                     Text(
                         text = gh.statusMessage,
                         style = MaterialTheme.typography.labelSmall,
-                        color = if (gh.isUpdateAvailable) BullishEmerald else TextSecondary
+                        color = when {
+                            gh.isDowngradeDetected -> NeutralAmber
+                            gh.isUpdateAvailable && gh.isChecksumAvailable -> BullishEmerald
+                            gh.isUpdateAvailable -> NeutralAmber
+                            else -> TextSecondary
+                        }
                     )
 
-                    if (gh.apkDownloadUrl.isNotBlank()) {
+                    if (gh.expectedSha256.isNotBlank()) {
+                        Text(
+                            text = "SHA-256 Rilis (${gh.sha256AssetName.ifBlank { ".sha256" }}): ${gh.expectedSha256}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanSecondary
+                        )
+                    } else if (gh.latestTag.isNotBlank() && gh.apkDownloadUrl.isNotBlank()) {
+                        Text(
+                            text = "Peringatan: File checksum .sha256 tidak ditemukan pada rilis ini. Verifikasi hash manual dianjurkan sebelum instalasi.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeutralAmber
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Izinkan Rollback / Downgrade Versi",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Nonaktif secara bawaan untuk mencegah rollback ke versi lama.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.allowOtaDowngrade,
+                            onCheckedChange = onToggleAllowOtaDowngrade,
+                            modifier = Modifier.testTag("settings_ota_downgrade_switch")
+                        )
+                    }
+
+                    if (gh.apkDownloadUrl.isNotBlank() && LiveMarketAndNewsService.isTrustedOtaDownloadUrl(gh.apkDownloadUrl)) {
                         Button(
                             onClick = {
                                 runCatching {
@@ -302,7 +481,7 @@ fun SettingsScreen(
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (gh.isUpdateAvailable) BullishEmerald else GoldPrimary,
+                                containerColor = if (gh.isUpdateAvailable && gh.isChecksumAvailable) BullishEmerald else GoldPrimary,
                                 contentColor = ObsidianBg
                             ),
                             modifier = Modifier

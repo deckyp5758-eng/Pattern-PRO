@@ -50,9 +50,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.CompleteHubAnalysis
 import com.example.model.MarketSymbol
+import com.example.model.NewsDataStatus
 import com.example.model.NewsImpactLevel
 import com.example.model.PatternBias
 import com.example.model.Timeframe
+import com.example.model.TrendClassification
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
 import com.example.ui.theme.BullishEmerald
@@ -161,7 +163,8 @@ fun MtfMatrixScreen(
 
                     HorizontalDivider(color = SlateCardBorder)
 
-                    // Keselarasan 5 Timeframe
+                    val totalTfCount = mtf.rows.size.coerceAtLeast(1)
+                    // Keselarasan Timeframe
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -174,7 +177,7 @@ fun MtfMatrixScreen(
                                 modifier = Modifier.border(1.dp, BullishEmerald.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                             ) {
                                 Text(
-                                    text = "$bullCount/5 NAIK",
+                                    text = "$bullCount/$totalTfCount NAIK",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = BullishEmerald,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -186,7 +189,7 @@ fun MtfMatrixScreen(
                                 modifier = Modifier.border(1.dp, BearishCrimson.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                             ) {
                                 Text(
-                                    text = "$bearCount/5 TURUN",
+                                    text = "$bearCount/$totalTfCount TURUN",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = BearishCrimson,
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -199,7 +202,7 @@ fun MtfMatrixScreen(
                                     modifier = Modifier.border(1.dp, NeutralAmber.copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                                 ) {
                                     Text(
-                                        text = "$neutralCount/5 NETRAL",
+                                        text = "$neutralCount/$totalTfCount NETRAL",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = NeutralAmber,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -213,6 +216,25 @@ fun MtfMatrixScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = CyanSecondary
                         )
+                    }
+
+                    if (!mtf.isMtfDataComplete) {
+                        Surface(
+                            color = NeutralAmber.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, NeutralAmber.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .testTag("mtf_incomplete_banner")
+                        ) {
+                            Text(
+                                text = "Data MTF belum lengkap — kurang: ${mtf.missingTimeframes.joinToString(", ") { it.label }}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeutralAmber,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
                     }
 
                     Box(
@@ -322,12 +344,18 @@ fun MtfMatrixScreen(
                                     )
                                 }
 
-                                // Tren EMA Block
-                                val isTrendUp = row.trend.name.contains("BULL", ignoreCase = true) || row.trend.name.contains("UP", ignoreCase = true)
+                                // Tren EMA Block (3 State: Bullish / Bearish / Neutral)
+                                val (emaLabel, emaColor) = when (row.trend) {
+                                    TrendClassification.STRONG_BULLISH,
+                                    TrendClassification.BULLISH -> "▲ EMA" to BullishEmerald
+                                    TrendClassification.BEARISH,
+                                    TrendClassification.STRONG_BEARISH -> "▼ EMA" to BearishCrimson
+                                    TrendClassification.NEUTRAL -> "— EMA" to NeutralAmber
+                                }
                                 Text(
-                                    text = if (isTrendUp) "▲ EMA" else "▼ EMA",
+                                    text = emaLabel,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (isTrendUp) BullishEmerald else BearishCrimson,
+                                    color = emaColor,
                                     fontSize = 9.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -597,7 +625,20 @@ fun NewsEngineScreen(
 
                     HorizontalDivider(color = SlateCardBorder)
 
-                    // Indikator Sinkronisasi Otomatis & Pembersihan Usang Aktif
+                    val newsStatusColor = when (newsEngine.status) {
+                        NewsDataStatus.LIVE_FRESH -> BullishEmerald
+                        NewsDataStatus.CACHE_FRESH -> CyanSecondary
+                        NewsDataStatus.CACHE_STALE -> NeutralAmber
+                        NewsDataStatus.OFFLINE_EMPTY -> BearishCrimson
+                    }
+                    val defaultStatusMsg = when (newsEngine.status) {
+                        NewsDataStatus.LIVE_FRESH -> "Feed RSS Makro online segar terambil dari sumber."
+                        NewsDataStatus.CACHE_FRESH -> "Menggunakan cache lokal (< 5 menit) dengan catatan jadwal/berita."
+                        NewsDataStatus.CACHE_STALE -> "Data cache kedaluwarsa / offline fallback (gagal refresh live RSS)."
+                        NewsDataStatus.OFFLINE_EMPTY -> "Berita makro sedang offline dan cache lokal kosong."
+                    }
+
+                    // Indikator Status Kesegaran Data Berita Jujur
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -610,27 +651,28 @@ fun NewsEngineScreen(
                             Icon(
                                 imageVector = Icons.Default.Public,
                                 contentDescription = null,
-                                tint = if (newsEngine.isLiveRssSynced) BullishEmerald else NeutralAmber,
+                                tint = newsStatusColor,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
-                                text = if (newsEngine.isLiveRssSynced) "Smart Auto-Sync Aktif • Kalender & Berita Riil Terisi Otomatis" else "Mode Cadangan Offline",
+                                text = "Status Berita: ${newsEngine.status.label}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (newsEngine.isLiveRssSynced) BullishEmerald else NeutralAmber,
-                                fontWeight = FontWeight.Medium
+                                color = newsStatusColor,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.testTag("news_status_text")
                             )
                         }
                         Text(
-                            text = formatEpochSec(newsEngine.lastUpdatedMs / 1000L),
+                            text = if (newsEngine.lastUpdatedMs > 0L) formatEpochSec(newsEngine.lastUpdatedMs / 1000L) else "Belum tersinkron",
                             style = MaterialTheme.typography.labelSmall,
                             color = TextSecondary
                         )
                     }
 
                     Text(
-                        text = "✓ Berita & jadwal yang telah usang (>24 jam) otomatis dibersihkan. Kalender ekonomi mingguan selalu segar.",
+                        text = newsEngine.statusMessage.ifBlank { defaultStatusMsg },
                         style = MaterialTheme.typography.labelSmall,
-                        color = CyanSecondary
+                        color = if (newsEngine.status == NewsDataStatus.LIVE_FRESH) CyanSecondary else newsStatusColor
                     )
                 }
             }

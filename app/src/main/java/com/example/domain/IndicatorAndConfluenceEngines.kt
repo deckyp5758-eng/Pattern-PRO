@@ -1,8 +1,13 @@
 package com.example.domain
 
 import com.example.model.AnalyticalVerdict
+import com.example.model.BrokerContractSpec
 import com.example.model.CompleteHubAnalysis
 import com.example.model.DataEngineReport
+import com.example.model.GlobalMarketSession
+import com.example.model.HtfAlignmentReport
+import com.example.model.HtfAlignmentStatus
+import com.example.model.LotRiskCalculation
 import com.example.model.MacdState
 import com.example.model.MacroNewsArticle
 import com.example.model.MacroSentiment
@@ -11,28 +16,30 @@ import com.example.model.MarketSymbol
 import com.example.model.MomentumEngineReport
 import com.example.model.Mt5RateBar
 import com.example.model.MtfEngineReport
+import com.example.model.NewsDataStatus
 import com.example.model.NewsEngineReport
 import com.example.model.NewsImpactLevel
+import com.example.model.OnlineDataProvider
 import com.example.model.PatternBias
 import com.example.model.RsiRegime
+import com.example.model.SmartMoneyReport
 import com.example.model.SrInteractionType
 import com.example.model.StructureBreakEvent
 import com.example.model.Timeframe
 import com.example.model.TimeframeMatrixRow
+import com.example.model.TradingSessionReport
 import com.example.model.TrendClassification
 import com.example.model.TrendEngineReport
-import com.example.model.VolatilityEngineReport
-import com.example.model.VolatilityState
-import com.example.model.GlobalMarketSession
-import com.example.model.HtfAlignmentReport
-import com.example.model.HtfAlignmentStatus
-import com.example.model.SmartMoneyReport
-import com.example.model.TradingSessionReport
 import com.example.model.VolatilityBreakoutPoint
 import com.example.model.VolatilityBreakoutProbabilityReport
+import com.example.model.VolatilityEngineReport
+import com.example.model.VolatilityState
 import com.example.model.VolumeClassification
 import com.example.model.VolumeEngineReport
+import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.floor
+import kotlin.math.roundToInt
 
 object IndicatorAndConfluenceEngines {
 
@@ -314,30 +321,40 @@ object IndicatorAndConfluenceEngines {
         val htfRows = rows.filter { it.timeframe in listOf(Timeframe.H1, Timeframe.M30, Timeframe.M15) }
         val ltfRows = rows.filter { it.timeframe in listOf(Timeframe.M5, Timeframe.M1) }
 
-        val hasH1 = rows.any { it.timeframe == Timeframe.H1 }
-        val hasM15 = rows.any { it.timeframe == Timeframe.M15 }
-        val isMtfDataComplete = hasH1 && hasM15
+        val availableTfs = rows.map { it.timeframe }
+        val missingTfs = Timeframe.orderedByPriority.filter { tf ->
+            val tfBars = ratesByTf[tf]
+            tfBars == null || tfBars.size < 30
+        }
+        val hasH1 = availableTfs.contains(Timeframe.H1) && (ratesByTf[Timeframe.H1]?.size ?: 0) >= 30
+        val hasM30 = availableTfs.contains(Timeframe.M30) && (ratesByTf[Timeframe.M30]?.size ?: 0) >= 30
+        val hasM15 = availableTfs.contains(Timeframe.M15) && (ratesByTf[Timeframe.M15]?.size ?: 0) >= 30
+        val isMtfDataComplete = hasH1 && hasM30 && hasM15
 
         val htfBullCount = htfRows.count { it.bias == PatternBias.BULLISH }
         val htfBearCount = htfRows.count { it.bias == PatternBias.BEARISH }
 
         val htfBias = when {
-            !isMtfDataComplete -> PatternBias.NEUTRAL // Wajib H1 & M15 lengkap untuk mengklaim konfluensi HTF
+            !isMtfDataComplete -> PatternBias.NEUTRAL // Wajib H1, M30 & M15 lengkap untuk konfluensi HTF
             htfBullCount >= 2 -> PatternBias.BULLISH
             htfBearCount >= 2 -> PatternBias.BEARISH
-            htfBullCount == 1 && htfBearCount == 0 && hasH1 -> PatternBias.BULLISH
-            htfBearCount == 1 && htfBullCount == 0 && hasH1 -> PatternBias.BEARISH
             else -> PatternBias.NEUTRAL
         }
 
         val ltfBullCount = ltfRows.count { it.bias == PatternBias.BULLISH }
         val ltfBearCount = ltfRows.count { it.bias == PatternBias.BEARISH }
 
-        val isPullback = (htfBias == PatternBias.BULLISH && ltfBearCount >= 1 && ltfBullCount == 0) ||
-            (htfBias == PatternBias.BEARISH && ltfBullCount >= 1 && ltfBearCount == 0)
+        val isPullback = isMtfDataComplete && (
+            (htfBias == PatternBias.BULLISH && ltfBearCount >= 1 && ltfBullCount == 0) ||
+                (htfBias == PatternBias.BEARISH && ltfBullCount >= 1 && ltfBearCount == 0)
+            )
+
+        val missingCoreLabels = listOf(Timeframe.H1, Timeframe.M30, Timeframe.M15)
+            .filter { it in missingTfs }
+            .joinToString(", ") { it.label }
 
         val ltfState = when {
-            !isMtfDataComplete -> "Data Timeframe Belum Lengkap"
+            !isMtfDataComplete -> "Data MTF Belum Lengkap (Kurang: $missingCoreLabels)"
             htfBias == PatternBias.BULLISH && isPullback -> "TF Kecil (M5/M1) Sedang Koreksi (Pullback)"
             htfBias == PatternBias.BEARISH && isPullback -> "TF Kecil (M5/M1) Sedang Koreksi Naik"
             htfBias == PatternBias.BULLISH && ltfBullCount >= 1 -> "Searah Naik (Bullish) dengan TF Besar"
@@ -347,15 +364,15 @@ object IndicatorAndConfluenceEngines {
 
         val conclusion = when {
             !isMtfDataComplete ->
-                "Data Multi-Timeframe belum lengkap (membutuhkan H1 dan M15). Konfluensi tren HTF ditahan (Netral) demi mencegah sinyal palsu."
+                "Data MTF belum lengkap (membutuhkan H1, M30, dan M15 yang valid; kurang: $missingCoreLabels). Konfluensi tren HTF ditahan (Netral) demi mencegah sinyal palsu."
             htfBias == PatternBias.BULLISH && isPullback ->
                 "Timeframe Besar (H1/M30/M15) Bullish (Naik), sedangkan Timeframe Kecil (M5/M1) sedang koreksi (Pullback). JANGAN langsung menyebut pembalikan arah (Reversal); tunggu konfirmasi candle tutup Higher Low (HL) di area Support."
             htfBias == PatternBias.BEARISH && isPullback ->
                 "Timeframe Besar (H1/M30/M15) Bearish (Turun), sedangkan Timeframe Kecil (M5/M1) sedang koreksi naik (Pullback). JANGAN langsung menyebut Reversal; tunggu konfirmasi candle tutup Lower High (LH) di area Resistance."
             htfBias == PatternBias.BULLISH ->
-                "Konfluensi Naik (Bullish) Selaras dari Timeframe Besar (H1 -> M30 -> M15) hingga Timeframe Kecil."
+                "Konfluensi Naik (Bullish) Selaras pada Timeframe Besar (H1 -> M30 -> M15) hingga Timeframe Kecil."
             htfBias == PatternBias.BEARISH ->
-                "Konfluensi Turun (Bearish) Selaras dari Timeframe Besar (H1 -> M30 -> M15) hingga Timeframe Kecil."
+                "Konfluensi Turun (Bearish) Selaras pada Timeframe Besar (H1 -> M30 -> M15) hingga Timeframe Kecil."
             else ->
                 "Struktur Multi-Timeframe sedang konsolidasi/transisi. Tunggu penembusan struktur yang sah di H1/M30."
         }
@@ -365,7 +382,10 @@ object IndicatorAndConfluenceEngines {
             htfBias = htfBias,
             ltfState = ltfState,
             isPullbackInHtfTrend = isPullback,
-            executiveConclusion = conclusion
+            executiveConclusion = conclusion,
+            availableTimeframes = availableTfs,
+            missingTimeframes = missingTfs,
+            isMtfDataComplete = isMtfDataComplete
         )
     }
 
@@ -378,7 +398,12 @@ object IndicatorAndConfluenceEngines {
         isLiveFeed: Boolean,
         feedSourceName: String,
         newsArticles: List<MacroNewsArticle>,
-        isLiveRss: Boolean
+        isLiveRss: Boolean,
+        newsStatus: NewsDataStatus = if (isLiveRss) NewsDataStatus.LIVE_FRESH else if (newsArticles.isNotEmpty()) NewsDataStatus.CACHE_STALE else NewsDataStatus.OFFLINE_EMPTY,
+        newsStatusDetail: String = "",
+        serverFetchTimeMs: Long = System.currentTimeMillis(),
+        currentTimeMs: Long = System.currentTimeMillis(),
+        brokerContractSpec: BrokerContractSpec? = null
     ): CompleteHubAnalysis {
         val bar0 = activeBars.first()
         val bar1 = activeBars.getOrElse(1) { bar0 }
@@ -393,7 +418,9 @@ object IndicatorAndConfluenceEngines {
             previousClosedCandle2 = bar2,
             isLiveFeedConnected = isLiveFeed,
             feedSourceLabel = feedSourceName,
-            lastSyncTimeMs = System.currentTimeMillis()
+            lastSyncTimeMs = serverFetchTimeMs,
+            serverDataTimeMs = serverFetchTimeMs,
+            calculatedAtDeviceTimeMs = currentTimeMs
         )
 
         val volatilityReport = runVolatilityEngine(activeBars, symbol)
@@ -421,15 +448,17 @@ object IndicatorAndConfluenceEngines {
             highImpactCount = highImpactNews,
             dominantSentiment = dominantSentiment,
             newsRiskWarning = newsWarning,
-            lastUpdatedMs = System.currentTimeMillis(),
-            isLiveRssSynced = isLiveRss
+            lastUpdatedMs = currentTimeMs,
+            isLiveRssSynced = newsStatus == NewsDataStatus.LIVE_FRESH,
+            status = newsStatus,
+            statusMessage = newsStatusDetail
         )
 
         // 12. SMART MONEY CONCEPTS (FVG & ORDER BLOCKS)
         val smartMoneyReport = CandleAndStructureEngines.runSmartMoneyEngine(activeBars, volatilityReport.atr14)
 
-        // 13. GLOBAL TRADING SESSION ENGINE
-        val sessionReport = runSessionEngine(bar1.timeEpochSec)
+        // 13. GLOBAL TRADING SESSION ENGINE (Sesi Saat Ini vs Sesi Candle Tutup [1])
+        val sessionReport = runSessionEngine(candleEpochSec = bar1.timeEpochSec, nowMs = currentTimeMs)
 
         // 14. HTF TREND ALIGNMENT GUARD
         val htfAlignmentReport = runHtfAlignmentGuard(activeTimeframe, allTimeframeBars, symbol)
@@ -494,9 +523,11 @@ object IndicatorAndConfluenceEngines {
             if (bar1.isBullish) bullPoints += 4 else if (bar1.isBearish) bearPoints += 4
         }
 
-        // 7. Bobot Multi-Timeframe (6 poin)
-        if (mtfReport.htfBias == PatternBias.BULLISH) bullPoints += 6
-        if (mtfReport.htfBias == PatternBias.BEARISH) bearPoints += 6
+        // 7. Bobot Multi-Timeframe (6 poin, hanya jika H1/M30/M15 lengkap)
+        if (mtfReport.isMtfDataComplete) {
+            if (mtfReport.htfBias == PatternBias.BULLISH) bullPoints += 6
+            if (mtfReport.htfBias == PatternBias.BEARISH) bearPoints += 6
+        }
 
         // 8. Bobot Smart Money FVG & Order Block (6 poin)
         if (smartMoneyReport.closedBar1InFvg) {
@@ -504,22 +535,19 @@ object IndicatorAndConfluenceEngines {
             if (bar1.isBearish || smartMoneyReport.nearestBearishFvg != null) bearPoints += 6
         }
 
-        // 9. Bobot Keselarasan HTF Trend Alignment Guard (5 poin)
+        // 9. Bobot Keselarasan HTF Trend Alignment Guard (5 poin, memakai enum, bukan string)
         if (htfAlignmentReport.status == HtfAlignmentStatus.PERFECT_ALIGNMENT) {
-            if (htfAlignmentReport.htfTrendLabel.contains("Bullish")) bullPoints += 5
-            if (htfAlignmentReport.htfTrendLabel.contains("Bearish")) bearPoints += 5
+            when (htfAlignmentReport.htfTrendClassification) {
+                TrendClassification.STRONG_BULLISH, TrendClassification.BULLISH -> bullPoints += 5
+                TrendClassification.STRONG_BEARISH, TrendClassification.BEARISH -> bearPoints += 5
+                TrendClassification.NEUTRAL -> {}
+            }
         }
 
         val finalBullScore = bullPoints.coerceIn(0, 100)
         val finalBearScore = bearPoints.coerceIn(0, 100)
 
-        val verdict = when {
-            mtfReport.isPullbackInHtfTrend && mtfReport.htfBias == PatternBias.BULLISH &&
-                activeTimeframe in listOf(Timeframe.M1, Timeframe.M5) ->
-                AnalyticalVerdict.HTF_BULLISH_LTF_PULLBACK
-            mtfReport.isPullbackInHtfTrend && mtfReport.htfBias == PatternBias.BEARISH &&
-                activeTimeframe in listOf(Timeframe.M1, Timeframe.M5) ->
-                AnalyticalVerdict.HTF_BEARISH_LTF_PULLBACK
+        val activeTfRawVerdict = when {
             finalBullScore >= 65 && finalBullScore > finalBearScore + 15 ->
                 AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE
             finalBearScore >= 65 && finalBearScore > finalBullScore + 15 ->
@@ -529,6 +557,27 @@ object IndicatorAndConfluenceEngines {
             finalBearScore >= 46 && finalBearScore > finalBullScore + 8 ->
                 AnalyticalVerdict.MODERATE_BEARISH_BIAS
             else -> AnalyticalVerdict.NEUTRAL_CONSOLIDATION
+        }
+
+        val verdict = when {
+            mtfReport.isMtfDataComplete && mtfReport.isPullbackInHtfTrend &&
+                mtfReport.htfBias == PatternBias.BULLISH &&
+                activeTimeframe in listOf(Timeframe.M1, Timeframe.M5) ->
+                AnalyticalVerdict.HTF_BULLISH_LTF_PULLBACK
+            mtfReport.isMtfDataComplete && mtfReport.isPullbackInHtfTrend &&
+                mtfReport.htfBias == PatternBias.BEARISH &&
+                activeTimeframe in listOf(Timeframe.M1, Timeframe.M5) ->
+                AnalyticalVerdict.HTF_BEARISH_LTF_PULLBACK
+            else -> activeTfRawVerdict
+        }
+
+        val mtfContextSummary = when {
+            !mtfReport.isMtfDataComplete ->
+                "Verdict ${activeTimeframe.label}: ${activeTfRawVerdict.label} • Konteks MTF belum lengkap (${mtfReport.ltfState})."
+            mtfReport.isPullbackInHtfTrend && activeTimeframe !in listOf(Timeframe.M1, Timeframe.M5) ->
+                "Verdict ${activeTimeframe.label}: ${verdict.label} • Catatan MTF: TF besar (${mtfReport.htfBias.label}) & TF kecil M5/M1 sedang koreksi (pullback)."
+            else ->
+                mtfReport.executiveConclusion
         }
 
         val checklist = listOf(
@@ -541,16 +590,16 @@ object IndicatorAndConfluenceEngines {
                 candleReport.activeClosedPatterns.isNotEmpty(),
             "Smart Money FVG & Order Block (${smartMoneyReport.activeFvgs.size} gap aktif)" to
                 (smartMoneyReport.activeFvgs.isNotEmpty() || smartMoneyReport.activeOrderBlocks.isNotEmpty()),
-            "Sesi Pasar: ${sessionReport.activeSession.sessionName} (${sessionReport.activeSession.liquidityRating})" to
+            "Sesi Pasar Aktif: ${sessionReport.currentSession.sessionName} (${sessionReport.currentSession.liquidityRating})" to
                 sessionReport.isHighLiquidityWindow,
             "Keselarasan HTF H1 (${htfAlignmentReport.status.label})" to
                 htfAlignmentReport.status.isAligned,
-            "Kekuatan Tren ADX(14) > 25 (${String.format(java.util.Locale.US, "%.1f", momentumReport.adx14)})" to
+            "Kekuatan Tren ADX(14) > 25 (${String.format(Locale.US, "%.1f", momentumReport.adx14)})" to
                 momentumReport.isTrendStrengthConfirmed,
-            "Ekspansi Volume > SMA 20 (${String.format(java.util.Locale.US, "%.2f", volumeReport.volumeToSmaRatio)}x)" to
+            "Ekspansi Volume > SMA 20 (${String.format(Locale.US, "%.2f", volumeReport.volumeToSmaRatio)}x)" to
                 volumeReport.isVolumeExpansion,
-            "Konfluensi Multi-Timeframe H1/M30/M15 (${mtfReport.htfBias.label})" to
-                (mtfReport.htfBias != PatternBias.NEUTRAL)
+            "Konfluensi Multi-Timeframe H1/M30/M15 (${if (mtfReport.isMtfDataComplete) mtfReport.htfBias.label else "Belum Lengkap"})" to
+                (mtfReport.isMtfDataComplete && mtfReport.htfBias != PatternBias.NEUTRAL)
         )
 
         return CompleteHubAnalysis(
@@ -575,51 +624,78 @@ object IndicatorAndConfluenceEngines {
             verdict = verdict,
             bullishConfluenceScore = finalBullScore,
             bearishConfluenceScore = finalBearScore,
-            confluenceChecklist = checklist
+            confluenceChecklist = checklist,
+            activeTimeframeVerdict = activeTfRawVerdict,
+            mtfContextSummary = mtfContextSummary,
+            brokerContractSpec = brokerContractSpec
         )
     }
 
     /**
      * 13. MESIN SESI PERDAGANGAN GLOBAL (GLOBAL TRADING SESSION ENGINE)
-     * Menghitung jam UTC dan menentukan sesi pasar dunia aktif (Asia, London, NY, Overlap).
+     * Memisahkan Sesi Pasar SAAT INI (nowMs) dengan Sesi saat Candle [1] tutup (candleEpochSec).
      */
-    fun runSessionEngine(epochSec: Long): TradingSessionReport {
-        val safeEpoch = if (epochSec > 0) epochSec else System.currentTimeMillis() / 1000L
-        val utcHour = ((safeEpoch % 86400L) / 3600L).toInt()
+    fun runSessionEngine(
+        candleEpochSec: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): TradingSessionReport {
+        val currentEpochSec = (nowMs / 1000L).coerceAtLeast(1L)
+        val safeCandleEpoch = if (candleEpochSec > 0L) candleEpochSec else currentEpochSec
 
-        val activeSession = when {
-            utcHour in 12..15 -> GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
-            utcHour in 16..20 -> GlobalMarketSession.NEW_YORK
-            utcHour in 7..11 -> GlobalMarketSession.LONDON
-            utcHour in 0..6 -> GlobalMarketSession.ASIA_PACIFIC
-            else -> GlobalMarketSession.PACIFIC_OFFPEAK
-        }
+        val currentUtcHour = (((currentEpochSec % 86400L) + 86400L) % 86400L / 3600L).toInt()
+        val candleUtcHour = (((safeCandleEpoch % 86400L) + 86400L) % 86400L / 3600L).toInt()
 
-        val isOverlap = activeSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
-        val isHighLiquidity = activeSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP ||
-            activeSession == GlobalMarketSession.NEW_YORK ||
-            activeSession == GlobalMarketSession.LONDON
+        val currentSession = classifyUtcHourSession(currentUtcHour)
+        val candleSession = classifyUtcHourSession(candleUtcHour)
+        val sameSession = currentSession == candleSession
 
-        val advice = when (activeSession) {
+        val isOverlap = currentSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
+        val isHighLiquidity = currentSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP ||
+            currentSession == GlobalMarketSession.NEW_YORK ||
+            currentSession == GlobalMarketSession.LONDON
+
+        val baseAdvice = when (currentSession) {
             GlobalMarketSession.LONDON_NEW_YORK_OVERLAP ->
-                "Sesi Emas London-NY Overlap: Likuiditas tertinggi hari ini. Sangat ideal mengeksekusi sinyal tren Candle [1] dengan target TP penuh."
+                "Sesi Emas London-NY Overlap: Likuiditas tertinggi hari ini. Ideal untuk memvalidasi sinyal tren Candle [1]."
             GlobalMarketSession.NEW_YORK ->
                 "Sesi New York: Momentum tinggi pasca rilis data AS. Perhatikan reaksi harga pada level S1/R1."
             GlobalMarketSession.LONDON ->
-                "Sesi London: Pembukaan pasar Eropa. Volume meningkat tajam mengikuti arah tren akumulasi."
+                "Sesi London: Pembukaan pasar Eropa. Volume meningkat mengikuti arah tren akumulasi."
             GlobalMarketSession.ASIA_PACIFIC ->
-                "Sesi Asia: Rentang harga cenderung sempit (akumulasi). Waspadai jebakan sapuan likuiditas (Asian sweep) sebelum breakout sesi London."
+                "Sesi Asia: Rentang harga cenderung sempit (akumulasi). Waspadai sapuan likuiditas sebelum sesi London."
             GlobalMarketSession.PACIFIC_OFFPEAK ->
-                "Sesi Off-Peak Pasifik: Volume rendah dan spread berpotensi melebar. Disarankan memantau tanpa membuka posisi baru."
+                "Sesi Off-Peak Pasifik: Volume rendah dan spread berpotensi melebar. Disarankan wait and see."
+        }
+        val advice = if (sameSession) {
+            baseAdvice
+        } else {
+            "$baseAdvice (Catatan: Candle tutup [1] terbentuk di ${candleSession.sessionName}, sedangkan sesi saat ini ${currentSession.sessionName})."
         }
 
         return TradingSessionReport(
-            activeSession = activeSession,
-            utcHour = utcHour,
+            activeSession = currentSession,
+            utcHour = currentUtcHour,
             isLondonNyOverlap = isOverlap,
             isHighLiquidityWindow = isHighLiquidity,
-            sessionAdvice = advice
+            sessionAdvice = advice,
+            currentSession = currentSession,
+            currentUtcHour = currentUtcHour,
+            currentTimeMs = nowMs,
+            candleSession = candleSession,
+            candleUtcHour = candleUtcHour,
+            candleTimeEpochSec = safeCandleEpoch,
+            isCandleFromCurrentSession = sameSession
         )
+    }
+
+    private fun classifyUtcHourSession(utcHour: Int): GlobalMarketSession {
+        return when (utcHour) {
+            in 12..15 -> GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
+            in 16..20 -> GlobalMarketSession.NEW_YORK
+            in 7..11 -> GlobalMarketSession.LONDON
+            in 0..6 -> GlobalMarketSession.ASIA_PACIFIC
+            else -> GlobalMarketSession.PACIFIC_OFFPEAK
+        }
     }
 
     /**
@@ -678,7 +754,89 @@ object IndicatorAndConfluenceEngines {
             htfTrendLabel = htfTrend.classification.label,
             ltfTrendLabel = ltfTrend.classification.label,
             advice = advice,
-            riskModifierNote = riskNote
+            riskModifierNote = riskNote,
+            htfTrendClassification = htfTrend.classification,
+            ltfTrendClassification = ltfTrend.classification
+        )
+    }
+
+    /**
+     * Menghitung Position Sizing & Risiko Akun:
+     * - Broker-native (Elev8 MT5) dengan spesifikasi kontrak broker terverifikasi -> Lot MT5 akurat.
+     * - Broker-native tanpa spesifikasi kontrak -> Fallback asumsi standar akun USD dengan disclaimer eksplisit.
+     * - Proxy feed (Binance/Yahoo/Kraken/Bitfinex/OKX/KuCoin) -> Position size indikatif (BUKAN lot MT5).
+     */
+    fun calculatePositionRisk(
+        symbol: MarketSymbol,
+        provider: OnlineDataProvider,
+        balanceDollars: Double,
+        riskPercentage: Double,
+        entryPrice: Double,
+        stopLossPrice: Double,
+        target1Price: Double,
+        target2Price: Double,
+        brokerSpec: BrokerContractSpec? = null
+    ): LotRiskCalculation {
+        val safeBalance = balanceDollars.coerceAtLeast(0.0)
+        val safeRiskPct = riskPercentage.coerceIn(0.1, 100.0)
+        val targetRiskDollars = safeBalance * (safeRiskPct / 100.0)
+        val slDistPrice = abs(entryPrice - stopLossPrice).coerceAtLeast(symbol.pointSize)
+        val tp1Ratio = (abs(target1Price - entryPrice) / slDistPrice).coerceAtLeast(0.0)
+        val tp2Ratio = (abs(target2Price - entryPrice) / slDistPrice).coerceAtLeast(0.0)
+
+        if (!provider.isBrokerNativeFeed) {
+            val indicativeUnits = (targetRiskDollars / slDistPrice).coerceAtLeast(0.0)
+            val actualRisk = indicativeUnits * slDistPrice
+            return LotRiskCalculation(
+                calculatedSize = indicativeUnits,
+                formattedSize = "${String.format(Locale.US, "%.2f", indicativeUnits)} unit",
+                isMt5VerifiedLot = false,
+                isProxyIndicativeOnly = true,
+                riskAmountDollars = targetRiskDollars,
+                actualSlLossDollars = actualRisk,
+                estimatedProfitTp1 = actualRisk * tp1Ratio,
+                estimatedProfitTp2 = actualRisk * tp2Ratio,
+                assumptionNote = "Position size indikatif (${provider.shortLabel}) — BUKAN lot MT5. Feed proxy spot/futures berbeda kuotasi & ukuran kontrak dengan broker MT5."
+            )
+        }
+
+        if (brokerSpec != null && brokerSpec.isBrokerVerified && brokerSpec.tickSize > 0.0 && brokerSpec.tickValue > 0.0) {
+            val lossPerLot = ((slDistPrice / brokerSpec.tickSize) * brokerSpec.tickValue).coerceAtLeast(0.01)
+            val step = brokerSpec.volumeStep.coerceAtLeast(0.01)
+            val rawLots = targetRiskDollars / lossPerLot
+            val steppedLots = (floor(rawLots / step) * step)
+                .coerceIn(brokerSpec.minVolume, brokerSpec.maxVolume)
+            val actualLoss = steppedLots * lossPerLot
+            return LotRiskCalculation(
+                calculatedSize = steppedLots,
+                formattedSize = String.format(Locale.US, "%.2f Lot", steppedLots),
+                isMt5VerifiedLot = true,
+                isProxyIndicativeOnly = false,
+                riskAmountDollars = targetRiskDollars,
+                actualSlLossDollars = actualLoss,
+                estimatedProfitTp1 = actualLoss * tp1Ratio,
+                estimatedProfitTp2 = actualLoss * tp2Ratio,
+                assumptionNote = "Spesifikasi broker ${brokerSpec.brokerSymbol} (${brokerSpec.accountCurrency}): ContractSize=${brokerSpec.contractSize}, TickSize=${brokerSpec.tickSize}, TickValue=${brokerSpec.tickValue}."
+            )
+        }
+
+        // Fallback broker-native standar akun USD (misal XAUUSD 100 oz -> $100 per $1.00 per 1 lot; EURUSD 100k -> $100,000 per 1.0000 per 1 lot)
+        val contractUnitsPerLot = if (symbol == MarketSymbol.XAUUSD) 100.0 else 100_000.0
+        val lossPerLotStandard = (slDistPrice * contractUnitsPerLot).coerceAtLeast(0.01)
+        val rawLots = targetRiskDollars / lossPerLotStandard
+        val steppedLots = (floor(rawLots / 0.01) * 0.01).coerceIn(0.01, 100.0)
+        val actualLoss = steppedLots * lossPerLotStandard
+
+        return LotRiskCalculation(
+            calculatedSize = steppedLots,
+            formattedSize = String.format(Locale.US, "%.2f Lot", steppedLots),
+            isMt5VerifiedLot = false,
+            isProxyIndicativeOnly = false,
+            riskAmountDollars = targetRiskDollars,
+            actualSlLossDollars = actualLoss,
+            estimatedProfitTp1 = actualLoss * tp1Ratio,
+            estimatedProfitTp2 = actualLoss * tp2Ratio,
+            assumptionNote = "Estimasi asumsi standar akun USD (ContractSize=${contractUnitsPerLot.toInt()}). Spesifikasi kontrak broker belum terverifikasi — cek Contract Size & akun mata uang di MT5 sebelum order."
         )
     }
 

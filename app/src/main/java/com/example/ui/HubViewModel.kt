@@ -74,7 +74,10 @@ data class HubUiState(
     val githubRelease: GitHubReleaseInfo = GitHubReleaseInfo(),
     val metaApiAccountIdInput: String = "",
     val metaApiAuthTokenInput: String = "",
+    val savedMetaApiAccountIdHint: String = "",
+    val savedMetaApiTokenHint: String = "",
     val hasCustomSavedCredentials: Boolean = false,
+    val allowOtaDowngrade: Boolean = false,
     val statusBannerMessage: String? = null
 )
 
@@ -95,9 +98,12 @@ class HubViewModel(
                 installedTag = repository.getInstalledReleaseTag()
             ),
             isTradeNotificationEnabled = repository.isTradeNotificationsEnabled(),
-            metaApiAccountIdInput = repository.getMetaApiAccountId(),
-            metaApiAuthTokenInput = repository.getMetaApiAuthToken(),
-            hasCustomSavedCredentials = repository.hasCustomMetaApiCredentials()
+            metaApiAccountIdInput = "",
+            metaApiAuthTokenInput = "",
+            savedMetaApiAccountIdHint = repository.getMaskedMetaApiAccountIdHint(),
+            savedMetaApiTokenHint = repository.getMaskedMetaApiTokenHint(),
+            hasCustomSavedCredentials = repository.hasCustomMetaApiCredentials(),
+            allowOtaDowngrade = repository.isAllowOtaDowngrade()
         )
     )
     val uiState: StateFlow<HubUiState> = _uiState.asStateFlow()
@@ -664,11 +670,14 @@ class HubViewModel(
                                 continue
                             }
                             val freshBar0 = freshBars.first()
+                            val nowDeviceMs = System.currentTimeMillis()
                             val updatedAnalysis = currentAnalysis.copy(
                                 bars = freshBars,
                                 dataEngine = currentAnalysis.dataEngine.copy(
                                     formingCandle0 = freshBar0,
-                                    lastSyncTimeMs = newFetchMs
+                                    lastSyncTimeMs = newFetchMs,
+                                    serverDataTimeMs = newFetchMs,
+                                    calculatedAtDeviceTimeMs = nowDeviceMs
                                 ),
                                 volumeEngine = currentAnalysis.volumeEngine.copy(
                                     formingBar0Volume = freshBar0.tickVolume
@@ -863,34 +872,56 @@ class HubViewModel(
         }
         repository.setCustomMetaApiCredentials(accId, token)
         repository.saveSelectedProvider(OnlineDataProvider.ELEV8_METAAPI)
+        val maskedAcc = repository.getMaskedMetaApiAccountIdHint()
+        val maskedTok = repository.getMaskedMetaApiTokenHint()
         _uiState.update {
             it.copy(
                 selectedProvider = OnlineDataProvider.ELEV8_METAAPI,
+                metaApiAccountIdInput = "",
+                metaApiAuthTokenInput = "",
+                savedMetaApiAccountIdHint = maskedAcc,
+                savedMetaApiTokenHint = maskedTok,
                 hasCustomSavedCredentials = true,
-                statusBannerMessage = "Kredensial Elev8 MT5 tersimpan permanen di penyimpanan lokal aplikasi. Menghubungkan ke MetaApi Cloud..."
+                statusBannerMessage = "Kredensial Elev8 MT5 terenkripsi disimpan ke penyimpanan lokal perangkat. Menghubungkan ke MetaApi Cloud..."
             )
         }
-        appendDiagnosticLog("Kredensial MetaApi tersimpan permanen (Account ID: ${accId.take(8)}...)")
+        appendDiagnosticLog("Kredensial Elev8 MT5 diperbarui & dienkripsi di penyimpanan lokal perangkat.")
         refreshMarketData(forceRefreshNews = false)
     }
 
     fun clearSavedMetaApiCredentials() {
         repository.clearCustomMetaApiCredentials()
-        val defaultAcc = repository.getMetaApiAccountId()
-        val defaultToken = repository.getMetaApiAuthToken()
         _uiState.update {
             it.copy(
-                metaApiAccountIdInput = defaultAcc,
-                metaApiAuthTokenInput = defaultToken,
+                metaApiAccountIdInput = "",
+                metaApiAuthTokenInput = "",
+                savedMetaApiAccountIdHint = "",
+                savedMetaApiTokenHint = "",
                 hasCustomSavedCredentials = false,
-                statusBannerMessage = "Kredensial tersimpan telah dihapus dari penyimpanan perangkat."
+                statusBannerMessage = "Kredensial tersimpan telah dihapus bersih dari penyimpanan perangkat."
             )
         }
-        appendDiagnosticLog("Kredensial kustom MetaApi dihapus dari penyimpanan lokal.")
+        appendDiagnosticLog("Kredensial Elev8 MT5 dihapus bersih dari penyimpanan perangkat.")
+    }
+
+    fun toggleAllowOtaDowngrade(enabled: Boolean) {
+        repository.saveAllowOtaDowngrade(enabled)
+        _uiState.update {
+            it.copy(
+                allowOtaDowngrade = enabled,
+                statusBannerMessage = if (enabled) {
+                    "Opsi downgrade versi OTA diaktifkan (gunakan hanya jika perlu rollback darurat)."
+                } else {
+                    "Proteksi anti-downgrade OTA diaktifkan."
+                }
+            )
+        }
     }
 
     fun checkGitHubReleaseUpdate() {
-        val currentRepo = _uiState.value.githubRelease.repository.trim()
+        val currentState = _uiState.value
+        val currentRepo = currentState.githubRelease.repository.trim()
+        val allowDowngrade = currentState.allowOtaDowngrade
         _uiState.update { state ->
             state.copy(
                 githubRelease = state.githubRelease.copy(
@@ -900,7 +931,7 @@ class HubViewModel(
             )
         }
         viewModelScope.launch {
-            val result = repository.checkLatestGitHubRelease(currentRepo)
+            val result = repository.checkLatestGitHubRelease(currentRepo, allowDowngrade = allowDowngrade)
             _uiState.update { state ->
                 state.copy(
                     githubRelease = result,
@@ -958,7 +989,12 @@ class HubViewModel(
             isLiveFeed = true,
             feedSourceName = "${prov.shortLabel} (${prov.baseHost})",
             newsArticles = mergedNews,
-            isLiveRss = true
+            isLiveRss = bundle.newsStatus == com.example.model.NewsDataStatus.LIVE_FRESH,
+            newsStatus = bundle.newsStatus,
+            newsStatusDetail = bundle.newsStatusDetail,
+            serverFetchTimeMs = bundle.serverFetchTimeMs,
+            currentTimeMs = System.currentTimeMillis(),
+            brokerContractSpec = bundle.brokerContractSpec
         )
 
         val mql5Code = Mql5IndicatorCodeGenerator.generateMq5Source(state.mql5Config, analysis)

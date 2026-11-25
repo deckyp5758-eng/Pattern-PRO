@@ -133,7 +133,8 @@ class ExampleRobolectricTest {
         assertEquals("test-account-id-12345", service.getMetaApiAccountId())
         assertEquals("test-auth-token-67890", service.getMetaApiAuthToken())
         assertEquals("new-york", service.getMetaApiRegion())
-        assertEquals("customuser/customrepo", service.getDefaultGitHubRepository())
+        // Security audit fix: untrusted custom repo slugs must NOT override pinned official OTA repository
+        assertEquals("deckyp5758-eng/Pattern-PRO", service.getDefaultGitHubRepository())
         assertTrue(service.isMetaApiConfigured())
         assertTrue(service.hasCustomCredentials())
 
@@ -146,29 +147,15 @@ class ExampleRobolectricTest {
 
     @Test
     fun diagnoseMetaApiLiveConnection() = runBlocking {
-        val service = LiveMarketAndNewsService()
-        val client = okhttp3.OkHttpClient()
-        val accId = BuildConfig.METAAPI_ACCOUNT_ID
-        val token = BuildConfig.METAAPI_AUTH_TOKEN
-        if (accId.isNotBlank() && !accId.startsWith("YOUR_")) {
-            runCatching {
-                val provReq = okhttp3.Request.Builder()
-                    .url("https://mt-provisioning-api-v1.agiliumtrade.ai/users/current/accounts/$accId")
-                    .header("auth-token", token)
-                    .build()
-                client.newCall(provReq).execute().use { resp ->
-                    println("METAAPI_PROV_STATUS=${resp.code}")
-                    println("METAAPI_PROV_BODY=${resp.body?.string()}")
-                }
-            }
-        }
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = com.example.data.local.UserPreferencesManager.getInstance(context)
+        val service = LiveMarketAndNewsService(prefs)
         val outcome = service.fetchSymbolRates(
             symbol = MarketSymbol.XAUUSD,
             timeframe = Timeframe.M15,
             provider = OnlineDataProvider.ELEV8_METAAPI
         )
         assertNotNull(outcome)
-        println("METAAPI_OUTCOME=$outcome")
     }
 
     @Test

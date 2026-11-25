@@ -6,10 +6,12 @@ import com.example.data.local.SavedSignalSnapshotEntity
 import com.example.data.local.UserPreferencesManager
 import com.example.data.remote.LiveMarketAndNewsService
 import com.example.domain.SystemDiagnosticGuard
+import com.example.model.BrokerContractSpec
 import com.example.model.MacroNewsArticle
 import com.example.model.MacroSentiment
 import com.example.model.MarketSymbol
 import com.example.model.Mt5RateBar
+import com.example.model.NewsDataStatus
 import com.example.model.NewsImpactLevel
 import com.example.model.OnlineDataProvider
 import com.example.model.Timeframe
@@ -84,10 +86,29 @@ class HubRepository(
         preferencesManager?.saveTradeNotificationsEnabled(enabled)
     }
 
+    fun isAllowOtaDowngrade(): Boolean {
+        return preferencesManager?.isAllowOtaDowngrade() ?: false
+    }
+
+    fun saveAllowOtaDowngrade(enabled: Boolean) {
+        preferencesManager?.saveAllowOtaDowngrade(enabled)
+    }
+
+    fun getMaskedMetaApiAccountIdHint(): String = preferencesManager?.getMaskedAccountIdHint().orEmpty()
+
+    fun getMaskedMetaApiTokenHint(): String = preferencesManager?.getMaskedTokenHint().orEmpty()
+
     fun getInstalledReleaseTag(): String = remoteService.getInstalledReleaseTag()
 
-    suspend fun checkLatestGitHubRelease(repoInput: String) =
-        remoteService.checkLatestGitHubRelease(repoInput)
+    suspend fun checkLatestGitHubRelease(repoInput: String, allowDowngrade: Boolean = isAllowOtaDowngrade()) =
+        remoteService.checkLatestGitHubRelease(repoInput, allowDowngrade)
+
+    data class NewsFetchBundle(
+        val articles: List<MacroNewsArticle>,
+        val status: NewsDataStatus,
+        val fetchedAtMs: Long,
+        val detailMessage: String
+    )
 
     sealed class BundleFetchOutcome {
         data class Success(
@@ -99,7 +120,10 @@ class HubRepository(
             val serverFetchTimeMs: Long,
             val newsArticles: List<MacroNewsArticle>,
             val wasNewsServedFromCache: Boolean,
-            val fetchDurationMs: Long
+            val fetchDurationMs: Long,
+            val newsStatus: NewsDataStatus = if (wasNewsServedFromCache) NewsDataStatus.CACHE_FRESH else if (newsArticles.isNotEmpty()) NewsDataStatus.LIVE_FRESH else NewsDataStatus.OFFLINE_EMPTY,
+            val newsStatusDetail: String = "",
+            val brokerContractSpec: BrokerContractSpec? = null
         ) : BundleFetchOutcome()
 
         data class Error(
@@ -142,6 +166,7 @@ class HubRepository(
             var activeUrl = remoteService.buildProviderUrl(symbol, activeTimeframe, provider)
             var activeHttpCode = 200
             var serverFetchMs = System.currentTimeMillis()
+            var activeBrokerSpec: BrokerContractSpec? = null
 
             for ((tf, deferred) in tfJobs) {
                 when (val res = deferred.await()) {
@@ -149,10 +174,16 @@ class HubRepository(
                         val bar1Close = res.bars.getOrNull(1)?.close ?: 0.0
                         if (SystemDiagnosticGuard.isPriceMatchingSymbol(symbol, bar1Close)) {
                             ratesMap[tf] = res.bars
+                            if (res.brokerContractSpec != null && activeBrokerSpec == null) {
+                                activeBrokerSpec = res.brokerContractSpec
+                            }
                             if (tf == activeTimeframe) {
                                 activeUrl = res.endpointUrl
                                 activeHttpCode = res.httpStatusCode
                                 serverFetchMs = res.serverFetchTimestampMs
+                                if (res.brokerContractSpec != null) {
+                                    activeBrokerSpec = res.brokerContractSpec
+                                }
                             }
                         } else {
                             firstError = LiveMarketAndNewsService.RatesFetchOutcome.Error(
@@ -185,7 +216,7 @@ class HubRepository(
                 )
             }
 
-            val (newsList, fromCache) = newsJob.await()
+            val newsBundle = newsJob.await()
             val duration = (System.currentTimeMillis() - startMs).coerceAtLeast(1L)
 
             BundleFetchOutcome.Success(
@@ -195,9 +226,12 @@ class HubRepository(
                 primaryEndpointUrl = activeUrl,
                 httpStatusCode = activeHttpCode,
                 serverFetchTimeMs = serverFetchMs,
-                newsArticles = newsList,
-                wasNewsServedFromCache = fromCache,
-                fetchDurationMs = duration
+                newsArticles = newsBundle.articles,
+                wasNewsServedFromCache = newsBundle.status == NewsDataStatus.CACHE_FRESH || newsBundle.status == NewsDataStatus.CACHE_STALE,
+                fetchDurationMs = duration,
+                newsStatus = newsBundle.status,
+                newsStatusDetail = newsBundle.detailMessage,
+                brokerContractSpec = activeBrokerSpec
             )
         }
     }
@@ -232,26 +266,60 @@ class HubRepository(
         lastNewsFetchTimeMs = 0L
     }
 
+    suspend fun resolveNewsStateForTest(
+        forceRefresh: Boolean,
+        isOfflineTestMode: Boolean
+    ): NewsFetchBundle = getOrFetchMacroNews(forceRefresh, isOfflineTestMode)
+
     private suspend fun getOrFetchMacroNews(
         forceRefresh: Boolean,
         isOfflineTestMode: Boolean
-    ): Pair<List<MacroNewsArticle>, Boolean> = newsMutex.withLock {
+    ): NewsFetchBundle = newsMutex.withLock {
         if (isOfflineTestMode) {
-            return@withLock Pair(emptyList(), false)
+            return@withLock NewsFetchBundle(
+                articles = emptyList(),
+                status = NewsDataStatus.OFFLINE_EMPTY,
+                fetchedAtMs = 0L,
+                detailMessage = "Mode Uji Offline Aktif: Feed berita tidak dapat dijangkau."
+            )
         }
         val now = System.currentTimeMillis()
         val existing = cachedNews
         if (!forceRefresh && existing != null && (now - lastNewsFetchTimeMs) < NEWS_CACHE_TTL_MS) {
-            return@withLock Pair(existing, true)
+            return@withLock NewsFetchBundle(
+                articles = existing,
+                status = NewsDataStatus.CACHE_FRESH,
+                fetchedAtMs = lastNewsFetchTimeMs,
+                detailMessage = "Menggunakan cache berita lokal (< 5 menit)."
+            )
         }
         return@withLock when (val outcome = remoteService.fetchLiveMacroNews(false)) {
             is LiveMarketAndNewsService.NewsFetchOutcome.Success -> {
                 cachedNews = outcome.articles
-                lastNewsFetchTimeMs = now
-                Pair(outcome.articles, false)
+                lastNewsFetchTimeMs = outcome.fetchedAtMs
+                NewsFetchBundle(
+                    articles = outcome.articles,
+                    status = NewsDataStatus.LIVE_FRESH,
+                    fetchedAtMs = outcome.fetchedAtMs,
+                    detailMessage = "Tersinkronisasi langsung dengan feed berita online."
+                )
             }
             is LiveMarketAndNewsService.NewsFetchOutcome.Error -> {
-                Pair(existing.orEmpty(), false)
+                if (!existing.isNullOrEmpty()) {
+                    NewsFetchBundle(
+                        articles = existing,
+                        status = NewsDataStatus.CACHE_STALE,
+                        fetchedAtMs = lastNewsFetchTimeMs,
+                        detailMessage = "Feed berita gagal disegarkan (${outcome.errorMessage}); menampilkan cache lama."
+                    )
+                } else {
+                    NewsFetchBundle(
+                        articles = emptyList(),
+                        status = NewsDataStatus.OFFLINE_EMPTY,
+                        fetchedAtMs = 0L,
+                        detailMessage = outcome.errorMessage
+                    )
+                }
             }
         }
     }

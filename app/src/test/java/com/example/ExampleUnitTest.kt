@@ -141,7 +141,7 @@ class ExampleUnitTest {
         val service = com.example.data.remote.LiveMarketAndNewsService()
         val ghEmpty = service.checkLatestGitHubRelease("YOUR_GITHUB_USER/YOUR_REPO_NAME")
         assertEquals(false, ghEmpty.isUpdateAvailable)
-        assertTrue(ghEmpty.statusMessage.contains("username/nama-repo"))
+        assertTrue(ghEmpty.statusMessage.contains("Ditolak: OTA hanya mengizinkan repositori resmi"))
         assertTrue(service.getInstalledReleaseTag().startsWith("v1."))
     }
 }

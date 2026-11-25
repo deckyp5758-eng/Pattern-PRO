@@ -42,7 +42,8 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
@@ -68,10 +69,88 @@ android {
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
+  ignoreList.addAll(
+    listOf(
+      "FIREBASE_APPCHECK_DEBUG_TOKEN",
+      "METAAPI_ACCOUNT_ID",
+      "METAAPI_AUTH_TOKEN",
+      "KEYSTORE_BASE64",
+      "STORE_PASSWORD",
+      "KEY_PASSWORD",
+      "KEY_ALIAS",
+      "GITHUB_TOKEN",
+      "GEMINI_API_KEY"
+    )
+  )
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
+
+val verifyNoEmbeddedSecrets by tasks.registering {
+  group = "verification"
+  description = "Fails build if non-placeholder MetaApi credentials, tokens, or private keys exist in source/env/BuildConfig."
+  val rootDirSnapshot = rootProject.projectDir
+  val srcMainDirSnapshot = file("src/main")
+  val buildConfigDirProvider = layout.buildDirectory.dir("generated/source/buildConfig")
+  doLast {
+    val scanTargets = mutableListOf<File>()
+    listOf(".env", ".env.example").forEach { rel ->
+      val f = File(rootDirSnapshot, rel)
+      if (f.exists()) scanTargets.add(f)
+    }
+    if (srcMainDirSnapshot.exists()) {
+      srcMainDirSnapshot.walkTopDown()
+        .filter { it.isFile && it.extension in listOf("kt", "java", "xml", "properties", "json") }
+        .forEach { scanTargets.add(it) }
+    }
+    buildConfigDirProvider.get().asFile
+      .takeIf { it.exists() }
+      ?.walkTopDown()
+      ?.filter { it.isFile }
+      ?.forEach { scanTargets.add(it) }
+
+    val forbiddenPropRegex = Regex("""(?m)^\s*(METAAPI_ACCOUNT_ID|METAAPI_AUTH_TOKEN)\s*=""")
+    val forbiddenBuildConfigRegex = Regex("""\bMETAAPI_(ACCOUNT_ID|AUTH_TOKEN)\b""")
+    val privateKeyRegex = Regex("""-----BEGIN [A-Z ]*PRIVATE KEY-----""")
+    val jwtRegex = Regex("""eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}""")
+
+    val violations = mutableListOf<String>()
+    for (file in scanTargets) {
+      val content = file.readText()
+      if (file.name == ".env" || file.name == ".env.example") {
+        if (forbiddenPropRegex.containsMatchIn(content)) {
+          violations.add("${file.relativeTo(rootDirSnapshot)}: contains METAAPI_ACCOUNT_ID/METAAPI_AUTH_TOKEN key")
+        }
+      }
+      if (file.name == "BuildConfig.java" && forbiddenBuildConfigRegex.containsMatchIn(content)) {
+        violations.add("${file.relativeTo(rootDirSnapshot)}: BuildConfig embeds METAAPI credential field")
+      }
+      if (privateKeyRegex.containsMatchIn(content)) {
+        violations.add("${file.relativeTo(rootDirSnapshot)}: embeds private key block")
+      }
+      if (jwtRegex.containsMatchIn(content)) {
+        violations.add("${file.relativeTo(rootDirSnapshot)}: embeds hardcoded JWT-like token")
+      }
+    }
+    if (violations.isNotEmpty()) {
+      throw GradleException(
+        "Security build check failed — embedded secrets detected:\n - " +
+          violations.joinToString("\n - ")
+      )
+    }
+  }
+}
+
+tasks.configureEach {
+  if (name == "verifyNoEmbeddedSecrets") {
+    mustRunAfter("generateDebugBuildConfig", "generateReleaseBuildConfig")
+  }
+  if (name == "assembleRelease" || name == "packageRelease" || name == "bundleRelease" || name == "preReleaseBuild") {
+    if (name != "preReleaseBuild") {
+      dependsOn(verifyNoEmbeddedSecrets)
+    }
+  }
+}
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.

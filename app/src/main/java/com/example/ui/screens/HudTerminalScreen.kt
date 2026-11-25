@@ -74,6 +74,7 @@ import com.example.R
 import com.example.data.local.SavedSignalSnapshotEntity
 import com.example.model.AnalyticalVerdict
 import com.example.model.CompleteHubAnalysis
+import com.example.model.GlobalMarketSession
 import com.example.model.MarketSymbol
 import com.example.model.OnlineDataProvider
 import com.example.model.SrInteractionType
@@ -542,12 +543,12 @@ fun HudTerminalScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "KESIMPULAN ANALITIK CANDLE TUTUP [1]",
+                                text = "VERDIK TIMEFRAME AKTIF (${analysis.activeTimeframe.label}) • CANDLE TUTUP [1]",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
                             )
                             Text(
-                                text = verdict.label,
+                                text = analysis.activeTimeframeVerdict.label,
                                 style = MaterialTheme.typography.titleMedium,
                                 color = verdictColor,
                                 fontWeight = FontWeight.Bold
@@ -578,7 +579,7 @@ fun HudTerminalScreen(
                             trackColor = BearishCrimson.copy(alpha = 0.45f)
                         )
                         Text(
-                            text = analysis.mtfEngine.executiveConclusion,
+                            text = "Konteks MTF: ${analysis.mtfContextSummary}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = TextPrimary
                         )
@@ -715,8 +716,10 @@ fun HudTerminalScreen(
                 val session = analysis.sessionEngine
                 val htf = analysis.htfAlignmentGuard
                 val isHtfAligned = htf.status.isAligned
-                val isLondonKillzone = session.activeSession.sessionName.contains("London", ignoreCase = true)
-                val isOverlap = session.isHighLiquidityWindow
+                val isLondonKillzone = session.currentSession == GlobalMarketSession.LONDON ||
+                    session.currentSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
+                val isOverlap = session.isLondonNyOverlap ||
+                    session.currentSession == GlobalMarketSession.LONDON_NEW_YORK_OVERLAP
                 val sessionStatusColor = if (isOverlap) BullishEmerald else if (isLondonKillzone) CyanSecondary else NeutralAmber
 
                 Surface(
@@ -749,10 +752,13 @@ fun HudTerminalScreen(
                                 val sessionTitle = if (isOverlap) {
                                     "KILLZONE: LONDON/NY OVERLAP"
                                 } else {
-                                    session.activeSession.sessionName.uppercase()
+                                    session.currentSession.sessionName.uppercase()
                                 }
+                                val candleDiffNote = if (!session.isCandleFromCurrentSession) {
+                                    " • Candle [1]: ${session.candleSession.sessionName}"
+                                } else ""
                                 Text(
-                                    text = "$sessionTitle • ${session.activeSession.localHoursWib}",
+                                    text = "$sessionTitle • ${session.currentSession.localHoursWib}$candleDiffNote",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = sessionStatusColor,
                                     fontWeight = FontWeight.Bold,
@@ -760,7 +766,7 @@ fun HudTerminalScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "Likuiditas: ${session.activeSession.liquidityRating} | ${htf.riskModifierNote}",
+                                    text = "Likuiditas: ${session.currentSession.liquidityRating} | ${htf.riskModifierNote}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = TextSecondary,
                                     fontSize = 10.sp,
@@ -799,14 +805,23 @@ fun HudTerminalScreen(
             }
         }
 
-        // 5B. PENJELASAN ALUR SKENARIO GRAFIK & LEVEL HARGA MT5 (BISA DISALIN)
+        // 5B. PENJELASAN ALUR SKENARIO GRAFIK & LEVEL HARGA (BISA DISALIN)
         item {
             val sr = analysis.srEngine
             val vol = analysis.volatilityEngine
             val bar1Close = analysis.bars.getOrNull(1)?.close ?: analysis.bars.first().close
             val suppVal = sr.nearestSupport?.centerPrice ?: (bar1Close - vol.atr14 * 1.5)
             val resVal = sr.nearestResistance?.centerPrice ?: (bar1Close + vol.atr14 * 1.5)
-            val isBullishBias = analysis.bullishConfluenceScore >= analysis.bearishConfluenceScore
+            val isBuySignal = analysis.verdict in listOf(
+                AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BULLISH_BIAS
+            )
+            val isSellSignal = analysis.verdict in listOf(
+                AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BEARISH_BIAS
+            )
+            val isActionableSignal = isBuySignal || isSellSignal
+            val isBullishBias = isBuySignal || (!isSellSignal && analysis.bullishConfluenceScore >= analysis.bearishConfluenceScore)
             val entryVal = bar1Close
             val slVal = if (isBullishBias) vol.longStopReferencePrice else vol.shortStopReferencePrice
             val tpVal = if (isBullishBias) vol.longTarget1RPrice else vol.shortTarget1RPrice
@@ -818,6 +833,7 @@ fun HudTerminalScreen(
             val riskDistance = formatPrice(vol.atr14 * 1.5, digits)
             val rewardDistance = formatPrice(vol.atr14 * 2.25, digits)
             val patternLabel = analysis.candleEngine.activeClosedPatterns.firstOrNull()?.pattern?.displayName ?: "Netral / Tanpa Pola Khusus"
+            val isBrokerFeed = uiState.selectedProvider.isBrokerNativeFeed
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
@@ -837,25 +853,25 @@ fun HudTerminalScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "ANALISIS SKENARIO GRAFIK & LEVEL MT5",
+                                text = "ANALISIS SKENARIO GRAFIK & LEVEL KUNCI",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = GoldBright,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Penjelasan Arah, Toleransi Risiko, & Level Kunci yang Bisa Disalin",
+                                text = "Penjelasan Arah, Toleransi Risiko, & Level S/R yang Bisa Disalin",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
                             )
                         }
                         Surface(
-                            color = CyanSecondary.copy(alpha = 0.15f),
+                            color = (if (isBrokerFeed) CyanSecondary else NeutralAmber).copy(alpha = 0.15f),
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
-                                text = "SIAP LUKIS MT5",
+                                text = if (isBrokerFeed) "FEED BROKER MT5" else "PROXY ${uiState.selectedProvider.shortLabel}",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = CyanSecondary,
+                                color = if (isBrokerFeed) CyanSecondary else NeutralAmber,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
@@ -903,12 +919,11 @@ fun HudTerminalScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = "• Estimasi Risiko (Distance SL): $riskDistance point/pip ($${formatPrice(vol.atr14 * 1.5, digits)}).\n" +
-                                    "• Proyeksi Target (Reward 1.5R): $rewardDistance point/pip ($${formatPrice(vol.atr14 * 2.25, digits)}).\n" +
-                                    "• Rasio Risk-to-Reward: 1 : 1.5 (Sangat Sehat).\n" +
+                                text = "• Estimasi Jarak ATR Stop (1.5x ATR): $riskDistance point/pip.\n" +
+                                    "• Proyeksi Target 1.5R: $rewardDistance point/pip.\n" +
                                     "• Struktur Pasar (HH/HL/LH/LL): ${analysis.structureEngine.classification.label}.\n" +
                                     "• Smart Money (FVG & OB): ${analysis.smartMoneyEngine.fvgConfluenceNote}\n" +
-                                    "• Sesi Pasar: ${analysis.sessionEngine.activeSession.sessionName} (${analysis.sessionEngine.activeSession.localHoursWib}) — ${analysis.sessionEngine.sessionAdvice}\n" +
+                                    "• Sesi Pasar: ${analysis.sessionEngine.currentSession.sessionName} (${analysis.sessionEngine.currentSession.localHoursWib}) — ${analysis.sessionEngine.sessionAdvice}\n" +
                                     "• Konfirmasi Tren Besar H1: ${analysis.htfAlignmentGuard.advice}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = TextSecondary
@@ -916,24 +931,41 @@ fun HudTerminalScreen(
                         }
                     }
 
-                    // 5C. DIAGRAM VISUAL RISK VS REWARD (RR 1 : 1.5)
-                    RiskRewardVisualizerBar(
-                        entryPriceText = formatEntry,
-                        stopLossPriceText = formatSl,
-                        targetProfitPriceText = formatTp,
-                        riskPointsText = riskDistance,
-                        rewardPointsText = rewardDistance,
-                        isBullishBias = isBullishBias
-                    )
+                    if (isActionableSignal) {
+                        // 5C. DIAGRAM VISUAL RISK VS REWARD (Hanya jika sinyal BUY/SELL aktif)
+                        RiskRewardVisualizerBar(
+                            entryPriceText = formatEntry,
+                            stopLossPriceText = formatSl,
+                            targetProfitPriceText = formatTp,
+                            riskPointsText = riskDistance,
+                            rewardPointsText = rewardDistance,
+                            isBullishBias = isBullishBias
+                        )
+                    } else {
+                        Surface(
+                            color = NeutralBg,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, NeutralAmber.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                                .testTag("chart_standby_no_execution_plan")
+                        ) {
+                            Text(
+                                text = "STATUS STANDBY PADA CANDLE [1]: Belum ada rencana Entry/SL/TP aktif. Pantau reaksi di Support ($formatSupp) atau Resistance ($formatRes) setelah candle tutup berikutnya.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = NeutralAmber,
+                                modifier = Modifier.padding(10.dp)
+                            )
+                        }
+                    }
 
                     Text(
-                        text = "LEVEL HARGA MT5 (KETUK BADGE UNTUK SALIN):",
+                        text = "LEVEL SUPPORT & RESISTANCE KUNCI (KETUK UNTUK SALIN):",
                         style = MaterialTheme.typography.labelSmall,
                         color = TextSecondary,
                         fontWeight = FontWeight.Bold
                     )
 
-                    // Grid 4 Level MT5 dengan Tombol Salin
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -956,94 +988,103 @@ fun HudTerminalScreen(
                         )
                     }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        LevelCopyBox(
-                            title = "STOP LOSS (SL)",
-                            value = formatSl,
-                            subText = "Toleransi $riskDistance pt",
-                            borderColor = NeutralAmber,
-                            testTag = "chart_copy_sl",
-                            modifier = Modifier.weight(1f)
-                        )
-                        LevelCopyBox(
-                            title = "TARGET PROFIT (TP)",
-                            value = formatTp,
-                            subText = "Target $rewardDistance pt",
-                            borderColor = CyanSecondary,
-                            testTag = "chart_copy_tp",
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Tombol 1-Klik Salin Rencana Trading Lengkap
-                    val clipboard = LocalClipboardManager.current
-                    val ctx = LocalContext.current
-                    Button(
-                        onClick = {
-                            val fullPlan = buildString {
-                                appendLine("📌 RENCANA TRADING MT5: ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
-                                appendLine("• Arah Rekomendasi: ${if (isBullishBias) "BUY (Pantulan Support)" else "SELL (Tolakan Resistance)"}")
-                                appendLine("• Entry (Candle 1): $formatEntry")
-                                appendLine("• Stop Loss (SL): $formatSl (Toleransi: -$riskDistance pt)")
-                                appendLine("• Take Profit (TP): $formatTp (Target: +$rewardDistance pt)")
-                                appendLine("• Rasio Risk/Reward: 1 : 1.5")
-                                appendLine("• Support Terdekat (S1): $formatSupp")
-                                appendLine("• Resistance Terdekat (R1): $formatRes")
-                                appendLine("• Smart Money: ${analysis.smartMoneyEngine.fvgConfluenceNote}")
-                                appendLine("• Sesi Pasar: ${analysis.sessionEngine.activeSession.sessionName} (${analysis.sessionEngine.activeSession.localHoursWib})")
-                                appendLine("• Konfirmasi Tren H1: ${analysis.htfAlignmentGuard.status.label}")
-                                appendLine("• Dibuat oleh: HUB Pattern Engine")
-                            }
-                            clipboard.setText(AnnotatedString(fullPlan))
-                            Toast.makeText(
-                                ctx,
-                                "✓ Rencana trading lengkap tersalin! Siap di-paste ke MetaTrader 5 / Catatan",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = SlateSurfaceElevated,
-                            contentColor = CyanSecondary
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.dp, CyanSecondary.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("chart_copy_full_trading_plan")
-                    ) {
+                    if (isActionableSignal) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "Salin Rencana Lengkap",
-                                tint = CyanSecondary,
-                                modifier = Modifier.size(16.dp)
+                            LevelCopyBox(
+                                title = "STOP LOSS (SL)",
+                                value = formatSl,
+                                subText = "Toleransi $riskDistance pt",
+                                borderColor = NeutralAmber,
+                                testTag = "chart_copy_sl",
+                                modifier = Modifier.weight(1f)
                             )
-                            Text(
-                                text = "SALIN RENCANA TRADING LENGKAP KE MT5",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = CyanSecondary
+                            LevelCopyBox(
+                                title = "TARGET PROFIT (TP)",
+                                value = formatTp,
+                                subText = "Target $rewardDistance pt",
+                                borderColor = CyanSecondary,
+                                testTag = "chart_copy_tp",
+                                modifier = Modifier.weight(1f)
                             )
+                        }
+
+                        // Tombol 1-Klik Salin Rencana Trading Lengkap (Hanya saat BUY/SELL)
+                        val clipboard = LocalClipboardManager.current
+                        val ctx = LocalContext.current
+                        Button(
+                            onClick = {
+                                val fullPlan = buildString {
+                                    appendLine("📌 RENCANA ANALISIS (${uiState.selectedProvider.shortLabel}): ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
+                                    appendLine("• Arah Rekomendasi: ${if (isBuySignal) "BUY" else "SELL"}")
+                                    appendLine("• Entry (Candle 1): $formatEntry")
+                                    appendLine("• Stop Loss (SL): $formatSl (Toleransi: -$riskDistance pt)")
+                                    appendLine("• Take Profit (TP): $formatTp (Target: +$rewardDistance pt)")
+                                    appendLine("• Rasio Risk/Reward: 1 : 1.5")
+                                    appendLine("• Support Terdekat (S1): $formatSupp")
+                                    appendLine("• Resistance Terdekat (R1): $formatRes")
+                                    appendLine("• Smart Money: ${analysis.smartMoneyEngine.fvgConfluenceNote}")
+                                    appendLine("• Sesi Pasar: ${analysis.sessionEngine.currentSession.sessionName} (${analysis.sessionEngine.currentSession.localHoursWib})")
+                                    appendLine("• Konfirmasi Tren H1: ${analysis.htfAlignmentGuard.status.label}")
+                                    appendLine("• Dibuat oleh: HUB Pattern Engine")
+                                }
+                                clipboard.setText(AnnotatedString(fullPlan))
+                                Toast.makeText(
+                                    ctx,
+                                    if (isBrokerFeed) "✓ Rencana trading MT5 tersalin!" else "✓ Rencana referensi (${uiState.selectedProvider.shortLabel}) tersalin!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = SlateSurfaceElevated,
+                                contentColor = CyanSecondary
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, CyanSecondary.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("chart_copy_full_trading_plan")
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Salin Rencana Lengkap",
+                                    tint = CyanSecondary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = if (isBrokerFeed) "SALIN RENCANA TRADING LENGKAP KE MT5" else "SALIN RENCANA REFERENSI (${uiState.selectedProvider.shortLabel})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CyanSecondary
+                                )
+                            }
                         }
                     }
                 }
             }
         }
 
-        // 5C. SHORTCUT INTEGRASI WORKSPACE COCKPIT: TIKET EKSEKUSI MT5 & KALKULATOR LOT
+        // 5C. SHORTCUT INTEGRASI WORKSPACE COCKPIT: TIKET & KALKULATOR RISIKO
         item {
+            val isActionableSignal = analysis.verdict in listOf(
+                AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BULLISH_BIAS,
+                AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BEARISH_BIAS
+            )
+            val isBrokerFeed = uiState.selectedProvider.isBrokerNativeFeed
             Card(
                 colors = CardDefaults.cardColors(containerColor = SlateSurface),
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.5.dp, GoldPrimary, RoundedCornerShape(16.dp))
+                    .border(1.5.dp, if (isActionableSignal) GoldPrimary else SlateCardBorder, RoundedCornerShape(16.dp))
                     .clickable { onNavigateToTrade() }
                     .testTag("cockpit_jump_to_trade_card")
             ) {
@@ -1075,13 +1116,17 @@ fun HudTerminalScreen(
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "SIAP EKSEKUSI DI METATRADER 5?",
+                                text = when {
+                                    !isActionableSignal -> "STATUS STANDBY • CEK SAFETY GATE"
+                                    isBrokerFeed -> "SIAP EKSEKUSI DI METATRADER 5?"
+                                    else -> "BUKA KALKULATOR RISIKO (${uiState.selectedProvider.shortLabel})"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = GoldBright,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Buka Tiket Order, Lot Calculator & Safety Gate",
+                                text = "Buka Tiket Order, Position Calculator & Safety Gate",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextPrimary,
                                 fontWeight = FontWeight.Medium

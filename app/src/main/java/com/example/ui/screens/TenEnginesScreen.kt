@@ -60,6 +60,8 @@ import com.example.ui.theme.SlateSurface
 import com.example.ui.theme.SlateSurfaceElevated
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 enum class EngineGroup(val label: String) {
@@ -283,6 +285,8 @@ fun TenEnginesScreen(
                     "Volume & Spread [Candle 1]",
                     "TickVol: ${dEngine.closedCandle1.tickVolume} | RealVol: ${dEngine.closedCandle1.realVolume} | Spread: ${dEngine.closedCandle1.spread} poin"
                 )
+                EngineRow("Waktu Data Server", formatEngineMillis(dEngine.serverDataTimeMs))
+                EngineRow("Waktu Kalkulasi Perangkat", formatEngineMillis(dEngine.calculatedAtDeviceTimeMs))
             }
         }
 
@@ -572,10 +576,13 @@ fun TenEnginesScreen(
 
                 HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
 
+                val passedConfluence = analysis.confluenceChecklist.count { it.second }
+                val totalConfluence = analysis.confluenceChecklist.size
                 Text(
-                    text = "CHECKLIST 7 KRITERIA KONFLUENSI TERKUNCI [CANDLE 1]:",
+                    text = "CHECKLIST $totalConfluence KRITERIA KONFLUENSI TERKUNCI [CANDLE 1] ($passedConfluence/$totalConfluence Terpenuhi):",
                     style = MaterialTheme.typography.labelMedium,
-                    color = GoldBright
+                    color = GoldBright,
+                    modifier = Modifier.testTag("ten_engines_checklist_header")
                 )
 
                 analysis.confluenceChecklist.forEach { (criterion, passed) ->
@@ -624,6 +631,14 @@ fun TenEnginesScreen(
             ) {
                 EngineRow("Bias Timeframe Besar (H1/M30/M15)", mtfEngine.htfBias.label)
                 EngineRow("Kondisi Timeframe Kecil (M5/M1)", mtfEngine.ltfState)
+                EngineRow(
+                    "Kelengkapan Data MTF",
+                    if (mtfEngine.isMtfDataComplete) {
+                        "Lengkap (${mtfEngine.availableTimeframes.joinToString(", ") { it.label }})"
+                    } else {
+                        "Belum lengkap — kurang: ${mtfEngine.missingTimeframes.joinToString(", ") { it.label }}"
+                    }
+                )
                 EngineRow(
                     "Status Koreksi (Pullback)",
                     if (mtfEngine.isPullbackInHtfTrend) "PULLBACK AKTIF (Waspada Reversal Prematur)" else "SEARAH TREN UTAMA"
@@ -675,7 +690,10 @@ fun TenEnginesScreen(
             ) {
                 EngineRow("Sentimen Dominan", newsEngine.dominantSentiment.label)
                 EngineRow("Berita Dampak Tinggi Aktif", "${newsEngine.highImpactCount} Agenda Terkait ${analysis.symbol.code}")
-                EngineRow("Status Sinkronisasi RSS", if (newsEngine.isLiveRssSynced) "LIVE ONLINE RSS TERVERIFIKASI" else "OFFLINE / CADANGAN")
+                EngineRow("Status Sinkronisasi Berita", newsEngine.status.label)
+                if (newsEngine.statusMessage.isNotBlank()) {
+                    EngineRow("Detail Sumber Berita", newsEngine.statusMessage)
+                }
                 if (newsEngine.newsRiskWarning != null) {
                     HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
                     Text(
@@ -720,12 +738,17 @@ fun TenEnginesScreen(
             EngineSectionCard(
                 engineNumber = "14",
                 title = "MESIN SESI PASAR GLOBAL (ASIA / LONDON / NY)",
-                badgeText = session.activeSession.sessionName,
+                badgeText = session.currentSession.sessionName,
                 badgeColor = if (session.isHighLiquidityWindow) BullishEmerald else NeutralAmber
             ) {
-                EngineRow("Sesi Pasar Berjalan", session.activeSession.sessionName)
-                EngineRow("Jam Lokal WIB", session.activeSession.localHoursWib)
-                EngineRow("Tingkat Likuiditas Pasar", session.activeSession.liquidityRating)
+                EngineRow("Sesi Pasar Sekarang (Waktu Real)", "${session.currentSession.sessionName} (UTC ${session.currentUtcHour}:00)")
+                EngineRow("Jam Lokal WIB Sekarang", session.currentSession.localHoursWib)
+                EngineRow(
+                    "Sesi Candle Tutup [1]",
+                    "${session.candleSession.sessionName} (UTC ${session.candleUtcHour}:00) • " +
+                        if (session.isCandleFromCurrentSession) "Sesi Berjalan" else "Candle Sesi Sebelumnya"
+                )
+                EngineRow("Tingkat Likuiditas Pasar", session.currentSession.liquidityRating)
                 EngineRow("Status Overlap London-NY", if (session.isLondonNyOverlap) "YA (SESI EMAS VOLUME TERTINGGI)" else "TIDAK (Sesi Reguler)")
                 HorizontalDivider(color = SlateCardBorder, modifier = Modifier.padding(vertical = 4.dp))
                 Text(
@@ -852,4 +875,9 @@ private fun EngineRow(label: String, value: String) {
             modifier = Modifier.weight(0.58f)
         )
     }
+}
+
+private fun formatEngineMillis(ms: Long): String {
+    if (ms <= 0L) return "-"
+    return SimpleDateFormat("dd/MM HH:mm:ss", Locale.US).format(Date(ms))
 }

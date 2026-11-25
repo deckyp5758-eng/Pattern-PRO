@@ -115,16 +115,22 @@ fun TradeSignalScreen(
     val slDistancePrice = abs(entryPrice - slPrice)
     val slDistancePoints = slDistancePrice / symbol.pointSize
 
-    // Kalkulasi Rekomendasi Lot Sesuai Ukuran Kontrak Standar Forex/Emas
-    // XAUUSD: 1 lot = 100 oz (1 poin = $1), EURUSD: 1 lot = 100,000 unit (1 pip = $10)
-    val pipValuePerLot = if (symbol == com.example.model.MarketSymbol.XAUUSD) 1.0 else 10.0
-    val pointDivisor = if (symbol == com.example.model.MarketSymbol.XAUUSD) 1.0 else 10.0
-    val pipsAtRisk = (slDistancePoints / pointDivisor).coerceAtLeast(1.0)
-    val calculatedLotSize = ((riskAmountDollars / (pipsAtRisk * pipValuePerLot))).coerceIn(0.01, 100.0)
-    val lotFormatted = String.format(Locale.US, "%.2f", calculatedLotSize)
-
-    val estProfitTp1 = riskAmountDollars * 1.5
-    val estProfitTp2 = riskAmountDollars * 2.5
+    val lotCalc = com.example.domain.IndicatorAndConfluenceEngines.calculatePositionRisk(
+        symbol = symbol,
+        provider = selectedProvider,
+        balanceDollars = balanceNum,
+        riskPercentage = selectedRiskPct,
+        entryPrice = entryPrice,
+        stopLossPrice = slPrice,
+        target1Price = tp1Price,
+        target2Price = tp2Price,
+        brokerSpec = analysis.brokerContractSpec
+    )
+    val lotFormatted = lotCalc.formattedSize
+    val estProfitTp1 = lotCalc.estimatedProfitTp1
+    val estProfitTp2 = lotCalc.estimatedProfitTp2
+    val isMt5LotFeed = selectedProvider.isBrokerNativeFeed && !lotCalc.isProxyIndicativeOnly
+    val isStandby = !isBuy && !isSell
 
     val signalBadgeColor = when {
         isBuy -> BullishEmerald
@@ -425,89 +431,117 @@ fun TradeSignalScreen(
 
                     HorizontalDivider(color = SlateCardBorder)
 
-                    // Petunjuk Salin Cepat untuk MetaTrader 5
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "PARAMETER EKSEKUSI MT5:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
+                    if (isStandby) {
                         Surface(
-                            color = CyanSecondary.copy(alpha = 0.15f),
-                            shape = RoundedCornerShape(6.dp)
+                            color = SlateSurfaceElevated,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(1.dp, NeutralAmber.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+                                .testTag("trade_standby_notice")
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            Column(
+                                modifier = Modifier.padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.ContentCopy,
-                                    contentDescription = null,
-                                    tint = CyanSecondary,
-                                    modifier = Modifier.size(12.dp)
+                                Text(
+                                    text = "TIDAK ADA SETUP EKSEKUSI AKTIF (STANDBY)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = NeutralAmber,
+                                    fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "Ketuk untuk Salin",
+                                    text = "Sinyal Entry, Stop Loss, dan Take Profit aktif disembunyikan hingga Candle Tutup [1] mengonfirmasi arah BUY atau SELL dengan keselarasan MTF.",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = CyanSecondary,
-                                    fontWeight = FontWeight.Bold
+                                    color = TextSecondary
                                 )
                             }
                         }
-                    }
+                    } else {
+                        // Petunjuk Salin Cepat untuk MetaTrader 5 / Setup
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (isMt5LotFeed) "PARAMETER EKSEKUSI MT5:" else "PARAMETER REFERENSI (${selectedProvider.shortLabel}):",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextSecondary,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Surface(
+                                color = CyanSecondary.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = null,
+                                        tint = CyanSecondary,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Ketuk untuk Salin",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = CyanSecondary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
 
-                    // GRID 4 PARAMETER UTAMA EKSEKUSI
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ExecutionMetricBox(
-                            title = "HARGA ENTRY",
-                            value = formatPrice(entryPrice, digits),
-                            subText = "Candle [1] Close",
-                            borderColor = CyanSecondary,
-                            testTag = "trade_metric_entry",
-                            modifier = Modifier.weight(1f)
-                        )
-                        ExecutionMetricBox(
-                            title = "STOP LOSS (SL)",
-                            value = formatPrice(slPrice, digits),
-                            subText = "${slDistancePoints.toInt()} Poin ATR",
-                            borderColor = BearishCrimson,
-                            testTag = "trade_metric_sl",
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                        // GRID 4 PARAMETER UTAMA EKSEKUSI
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ExecutionMetricBox(
+                                title = "HARGA ENTRY",
+                                value = formatPrice(entryPrice, digits),
+                                subText = "Candle [1] Close",
+                                borderColor = CyanSecondary,
+                                testTag = "trade_metric_entry",
+                                modifier = Modifier.weight(1f)
+                            )
+                            ExecutionMetricBox(
+                                title = "STOP LOSS (SL)",
+                                value = formatPrice(slPrice, digits),
+                                subText = "${slDistancePoints.toInt()} Poin ATR",
+                                borderColor = BearishCrimson,
+                                testTag = "trade_metric_sl",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        ExecutionMetricBox(
-                            title = "TARGET 1 (TP1)",
-                            value = formatPrice(tp1Price, digits),
-                            subText = "Rasio 1 : 1.5 (Aman)",
-                            borderColor = BullishEmerald,
-                            testTag = "trade_metric_tp1",
-                            modifier = Modifier.weight(1f)
-                        )
-                        ExecutionMetricBox(
-                            title = "TARGET 2 (TP2)",
-                            value = formatPrice(tp2Price, digits),
-                            subText = "Rasio 1 : 2.5 (Tren)",
-                            borderColor = GoldBright,
-                            testTag = "trade_metric_tp2",
-                            modifier = Modifier.weight(1f)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            ExecutionMetricBox(
+                                title = "TARGET 1 (TP1)",
+                                value = formatPrice(tp1Price, digits),
+                                subText = "Rasio 1 : 1.5 (Aman)",
+                                borderColor = BullishEmerald,
+                                testTag = "trade_metric_tp1",
+                                modifier = Modifier.weight(1f)
+                            )
+                            ExecutionMetricBox(
+                                title = "TARGET 2 (TP2)",
+                                value = formatPrice(tp2Price, digits),
+                                subText = "Rasio 1 : 2.5 (Tren)",
+                                borderColor = GoldBright,
+                                testTag = "trade_metric_tp2",
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
                     }
                 }
             }
@@ -528,15 +562,15 @@ fun TradeSignalScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Text(
-                        text = "KALKULATOR UKURAN LOT & RISIKO AKUN",
+                        text = if (isMt5LotFeed) "KALKULATOR UKURAN LOT & RISIKO AKUN MT5" else "KALKULATOR POSITION SIZE INDIKATIF (${selectedProvider.shortLabel})",
                         style = MaterialTheme.typography.titleMedium,
                         color = GoldBright,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Menghitung ukuran lot aman berdasarkan jarak Stop Loss (${slDistancePoints.toInt()} Poin ATR) dari provider ${selectedProvider.shortLabel}.",
+                        text = lotCalc.assumptionNote,
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
+                        color = if (lotCalc.isProxyIndicativeOnly || !lotCalc.isMt5VerifiedLot) NeutralAmber else CyanSecondary
                     )
 
                     // Presets Modal Cepat
@@ -595,7 +629,7 @@ fun TradeSignalScreen(
 
                     HorizontalDivider(color = SlateCardBorder)
 
-                    // Hasil Rekomendasi Lot
+                    // Hasil Rekomendasi Position Sizing
                     val clipboard = LocalClipboardManager.current
                     val ctx = LocalContext.current
                     Box(
@@ -605,12 +639,14 @@ fun TradeSignalScreen(
                             .background(SlateSurfaceElevated)
                             .border(1.dp, SlateCardBorder, RoundedCornerShape(12.dp))
                             .clickable {
-                                clipboard.setText(AnnotatedString(lotFormatted))
-                                Toast.makeText(
-                                    ctx,
-                                    "✓ Ukuran Lot ($lotFormatted) tersalin - Siap di-paste ke MetaTrader 5",
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                                val sizeToCopy = String.format(Locale.US, "%.2f", lotCalc.calculatedSize)
+                                clipboard.setText(AnnotatedString(sizeToCopy))
+                                val toastMsg = if (isMt5LotFeed) {
+                                    "✓ Lot ($lotFormatted) tersalin"
+                                } else {
+                                    "✓ Position size indikatif ($lotFormatted) tersalin (bukan lot MT5)"
+                                }
+                                Toast.makeText(ctx, toastMsg, Toast.LENGTH_SHORT).show()
                             }
                             .padding(12.dp)
                             .testTag("trade_lot_result_box")
@@ -621,13 +657,17 @@ fun TradeSignalScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Rekomendasi Ukuran Lot:", style = MaterialTheme.typography.bodyMedium, color = TextPrimary)
+                                Text(
+                                    text = if (isMt5LotFeed) "Rekomendasi Lot MT5:" else "Position Size Indikatif (Bukan Lot MT5):",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = TextPrimary
+                                )
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     Text(
-                                        text = "$lotFormatted Lot",
+                                        text = lotFormatted,
                                         style = MaterialTheme.typography.titleMedium,
                                         color = GoldBright,
                                         fontWeight = FontWeight.Bold
@@ -643,7 +683,7 @@ fun TradeSignalScreen(
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.ContentCopy,
-                                                contentDescription = "Salin Lot",
+                                                contentDescription = "Salin Ukuran Posisi",
                                                 tint = GoldBright,
                                                 modifier = Modifier.size(12.dp)
                                             )
@@ -662,9 +702,9 @@ fun TradeSignalScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Maksimal Risiko (Stop Loss):", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("Target Risiko / Risiko Aktual SL:", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
                                 Text(
-                                    text = "-$${String.format(Locale.US, "%.2f", riskAmountDollars)} (${selectedRiskPct}%)",
+                                    text = "-$${String.format(Locale.US, "%.2f", lotCalc.actualSlLossDollars)} (Target $${String.format(Locale.US, "%.2f", lotCalc.riskAmountDollars)})",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = BearishCrimson,
                                     fontWeight = FontWeight.Bold
@@ -697,53 +737,62 @@ fun TradeSignalScreen(
                         }
                     }
 
-                    // Tombol 1-Klik Salin Rencana Setup Lengkap
-                    Button(
-                        onClick = {
-                            val orderPlan = buildString {
-                                appendLine("🚀 SETUP EKSEKUSI MT5: ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
-                                appendLine("• Aksi: ${if (isBuy) "BUY" else if (isSell) "SELL" else "STANDBY"}")
-                                appendLine("• Entry: ${formatPrice(entryPrice, digits)}")
-                                appendLine("• Lot Rekomendasi: $lotFormatted")
-                                appendLine("• Stop Loss: ${formatPrice(slPrice, digits)} (${slDistancePoints.toInt()} pt)")
-                                appendLine("• Target TP1 (1.5R): ${formatPrice(tp1Price, digits)}")
-                                appendLine("• Target TP2 (2.5R): ${formatPrice(tp2Price, digits)}")
-                                appendLine("• Risiko Dolar: -$${String.format(Locale.US, "%.2f", riskAmountDollars)}")
-                                appendLine("• Estimasi Reward TP1: +$${String.format(Locale.US, "%.2f", estProfitTp1)}")
-                                appendLine("• Feed: ${selectedProvider.shortLabel}")
-                            }
-                            clipboard.setText(AnnotatedString(orderPlan))
-                            Toast.makeText(
-                                ctx,
-                                "✓ Seluruh setup order MT5 disalin ke clipboard!",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = CyanSecondary,
-                            contentColor = ObsidianBg
-                        ),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp)
-                            .testTag("copy_complete_order_setup")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    // Tombol Salin Setup Order hanya saat sinyal BUY atau SELL terkonfirmasi
+                    if (!isStandby) {
+                        Button(
+                            onClick = {
+                                val orderPlan = buildString {
+                                    appendLine("🚀 RENCANA SETUP (${selectedProvider.shortLabel}): ${analysis.dataEngine.symbolWithSuffix} (${analysis.activeTimeframe.label})")
+                                    appendLine("• Aksi: ${if (isBuy) "BUY" else "SELL"}")
+                                    appendLine("• Entry: ${formatPrice(entryPrice, digits)}")
+                                    appendLine("• Ukuran Posisi: $lotFormatted")
+                                    appendLine("• Stop Loss: ${formatPrice(slPrice, digits)} (${slDistancePoints.toInt()} pt)")
+                                    appendLine("• Target TP1 (1.5R): ${formatPrice(tp1Price, digits)}")
+                                    appendLine("• Target TP2 (2.5R): ${formatPrice(tp2Price, digits)}")
+                                    appendLine("• Risiko Aktual SL: -$${String.format(Locale.US, "%.2f", lotCalc.actualSlLossDollars)}")
+                                    appendLine("• Estimasi Reward TP1: +$${String.format(Locale.US, "%.2f", estProfitTp1)}")
+                                    appendLine("• Catatan: ${lotCalc.assumptionNote}")
+                                }
+                                clipboard.setText(AnnotatedString(orderPlan))
+                                Toast.makeText(
+                                    ctx,
+                                    if (isMt5LotFeed) "✓ Setup order MT5 disalin ke clipboard!" else "✓ Rencana referensi (${selectedProvider.shortLabel}) disalin!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CyanSecondary,
+                                contentColor = ObsidianBg
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("copy_complete_order_setup")
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Text(
-                                text = "SALIN SELURUH SETUP ORDER MT5",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = if (isMt5LotFeed) "SALIN SELURUH SETUP ORDER MT5" else "SALIN RENCANA REFERENSI (${selectedProvider.shortLabel})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
+                    } else {
+                        Text(
+                            text = "Salin Setup Order dinonaktifkan saat status STANDBY/WAIT.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = NeutralAmber,
+                            modifier = Modifier.testTag("trade_copy_suppressed_standby")
+                        )
                     }
                 }
             }
@@ -837,7 +886,7 @@ fun TradeSignalScreen(
 
                     HorizontalDivider(color = SlateCardBorder)
 
-                    // Daftar 7 Kriteria
+                    // Daftar Kriteria Konfluensi
                     analysis.confluenceChecklist.forEach { (criterion, passed) ->
                         Row(
                             modifier = Modifier

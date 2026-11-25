@@ -201,7 +201,9 @@ data class DataEngineReport(
     val previousClosedCandle2: Mt5RateBar,
     val isLiveFeedConnected: Boolean,
     val feedSourceLabel: String,
-    val lastSyncTimeMs: Long
+    val lastSyncTimeMs: Long,
+    val serverDataTimeMs: Long = lastSyncTimeMs,
+    val calculatedAtDeviceTimeMs: Long = lastSyncTimeMs
 )
 
 // 3. CANDLE ENGINE
@@ -450,10 +452,24 @@ data class MtfEngineReport(
     val htfBias: PatternBias,
     val ltfState: String,
     val isPullbackInHtfTrend: Boolean,
-    val executiveConclusion: String
+    val executiveConclusion: String,
+    val availableTimeframes: List<Timeframe> = rows.map { it.timeframe },
+    val missingTimeframes: List<Timeframe> = emptyList(),
+    val isMtfDataComplete: Boolean = missingTimeframes.none {
+        it == Timeframe.H1 || it == Timeframe.M30 || it == Timeframe.M15
+    } && rows.any { it.timeframe == Timeframe.H1 } &&
+        rows.any { it.timeframe == Timeframe.M30 } &&
+        rows.any { it.timeframe == Timeframe.M15 }
 )
 
 // 11. NEWS ENGINE (KOMPONEN WAJIB)
+enum class NewsDataStatus(val label: String) {
+    LIVE_FRESH("LIVE ONLINE"),
+    CACHE_FRESH("CACHE SEGAR (<5m)"),
+    CACHE_STALE("DATA CACHE / STALE"),
+    OFFLINE_EMPTY("OFFLINE")
+}
+
 enum class NewsImpactLevel(val label: String) {
     HIGH("DAMPAK TINGGI"),
     MEDIUM("DAMPAK SEDANG"),
@@ -486,7 +502,9 @@ data class NewsEngineReport(
     val dominantSentiment: MacroSentiment,
     val newsRiskWarning: String?,
     val lastUpdatedMs: Long,
-    val isLiveRssSynced: Boolean
+    val isLiveRssSynced: Boolean,
+    val status: NewsDataStatus = if (isLiveRssSynced) NewsDataStatus.LIVE_FRESH else if (articles.isNotEmpty()) NewsDataStatus.CACHE_STALE else NewsDataStatus.OFFLINE_EMPTY,
+    val statusMessage: String = ""
 )
 
 enum class AnalyticalVerdict(val label: String) {
@@ -550,7 +568,14 @@ data class TradingSessionReport(
     val utcHour: Int,
     val isLondonNyOverlap: Boolean,
     val isHighLiquidityWindow: Boolean,
-    val sessionAdvice: String
+    val sessionAdvice: String,
+    val currentSession: GlobalMarketSession = activeSession,
+    val currentUtcHour: Int = utcHour,
+    val currentTimeMs: Long = 0L,
+    val candleSession: GlobalMarketSession = activeSession,
+    val candleUtcHour: Int = utcHour,
+    val candleTimeEpochSec: Long = 0L,
+    val isCandleFromCurrentSession: Boolean = true
 )
 
 // 14. HTF TREND ALIGNMENT GUARD
@@ -565,7 +590,9 @@ data class HtfAlignmentReport(
     val htfTrendLabel: String,
     val ltfTrendLabel: String,
     val advice: String,
-    val riskModifierNote: String
+    val riskModifierNote: String,
+    val htfTrendClassification: TrendClassification = TrendClassification.NEUTRAL,
+    val ltfTrendClassification: TrendClassification = TrendClassification.NEUTRAL
 )
 
 // 15. HISTORICAL VOLATILITY & BREAKOUT PROBABILITY ZONE
@@ -591,6 +618,30 @@ data class VolatilityBreakoutProbabilityReport(
     val recentVolatilityPoints: List<VolatilityBreakoutPoint>
 )
 
+data class BrokerContractSpec(
+    val brokerSymbol: String,
+    val accountCurrency: String = "USD",
+    val contractSize: Double,
+    val tickSize: Double,
+    val tickValue: Double,
+    val minVolume: Double = 0.01,
+    val maxVolume: Double = 100.0,
+    val volumeStep: Double = 0.01,
+    val isBrokerVerified: Boolean
+)
+
+data class LotRiskCalculation(
+    val calculatedSize: Double,
+    val formattedSize: String,
+    val isMt5VerifiedLot: Boolean,
+    val isProxyIndicativeOnly: Boolean,
+    val riskAmountDollars: Double,
+    val actualSlLossDollars: Double,
+    val estimatedProfitTp1: Double,
+    val estimatedProfitTp2: Double,
+    val assumptionNote: String
+)
+
 data class CompleteHubAnalysis(
     val symbol: MarketSymbol,
     val brokerSuffix: String,
@@ -613,7 +664,10 @@ data class CompleteHubAnalysis(
     val verdict: AnalyticalVerdict,
     val bullishConfluenceScore: Int,
     val bearishConfluenceScore: Int,
-    val confluenceChecklist: List<Pair<String, Boolean>>
+    val confluenceChecklist: List<Pair<String, Boolean>>,
+    val activeTimeframeVerdict: AnalyticalVerdict = verdict,
+    val mtfContextSummary: String = mtfEngine.executiveConclusion,
+    val brokerContractSpec: BrokerContractSpec? = null
 )
 
 data class GitHubReleaseInfo(
@@ -629,6 +683,11 @@ data class GitHubReleaseInfo(
     val htmlReleaseUrl: String = "",
     val isUpdateAvailable: Boolean = false,
     val isChecking: Boolean = false,
-    val statusMessage: String = "Siap memeriksa pembaruan APK dari GitHub Releases."
+    val statusMessage: String = "Siap memeriksa pembaruan APK dari GitHub Releases.",
+    val expectedSha256: String = "",
+    val sha256AssetName: String = "",
+    val isChecksumAvailable: Boolean = false,
+    val isSigningCertVerified: Boolean = false,
+    val isDowngradeDetected: Boolean = false
 )
 

@@ -1,4 +1,4 @@
-name: Build & Release Android APK
+name: Build, Verify & Release Android APK
 
 on:
   push:
@@ -7,128 +7,214 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: 'Publikasikan APK Release ke GitHub Releases (memerlukan secrets signing)'
+        type: boolean
+        required: false
+        default: false
       release_notes:
         description: 'Catatan Rilis Update APK (Opsional)'
         required: false
-        default: 'Pembaruan otomatis HUB Smart Pattern Engine Pro (Elev8 MT5 & 10 Mesin Konfluensi).'
+        default: 'Pembaruan Pattern-PRO (Keamanan, Alignment Engine & Validasi Sinyal).'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release-apk:
-    name: Build Signed APK & Publish GitHub Release
+  ci-verify:
+    name: Secret Scan, Lint, Unit Tests & Static Checks
     runs-on: ubuntu-latest
 
     steps:
       - name: 1. Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: 2. Setup JDK 21 (Temurin)
-        uses: actions/setup-java@v4
+      - name: 2. Secret & Credential Hygiene Scan
+        run: |
+          if grep -rnE "METAAPI_AUTH_TOKEN\s*=|METAAPI_ACCOUNT_ID\s*=" .env .env.example 2>/dev/null; then
+            echo "ERROR: METAAPI credential property detected in .env files!"
+            exit 1
+          fi
+          if grep -rnE "-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\." app/src/main .env* 2>/dev/null; then
+            echo "ERROR: Hardcoded token or private key detected in source!"
+            exit 1
+          fi
+          echo "Secret scan passed."
+
+      - name: 3. Setup JDK 21 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 3. Konfigurasi Android SDK & Terima Lisensi Resmi
+      - name: 4. Configure Android SDK & Licenses
         run: |
           SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           sudo mkdir -p "${SDK_DIR}/licenses" || mkdir -p "${SDK_DIR}/licenses"
           sudo chown -R "$(id -u):$(id -g)" "${SDK_DIR}" || true
-          echo "ANDROID_HOME=${SDK_DIR}" >> $GITHUB_ENV
-          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> $GITHUB_ENV
+          echo "ANDROID_HOME=${SDK_DIR}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> "$GITHUB_ENV"
           printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${SDK_DIR}/licenses/android-sdk-license"
           printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "${SDK_DIR}/licenses/android-sdk-preview-license"
-          SDKMANAGER_BIN="${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "${SDKMANAGER_BIN}" ]; then
-            SDKMANAGER_BIN="$(command -v sdkmanager || true)"
-          fi
-          if [ -n "${SDKMANAGER_BIN}" ] && [ -x "${SDKMANAGER_BIN}" ]; then
-            yes | "${SDKMANAGER_BIN}" --sdk_root="${SDK_DIR}" --licenses > /dev/null 2>&1 || true
-          fi
-          echo "Android SDK siap digunakan di: ${SDK_DIR}"
 
-      - name: 4. Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
+      - name: 5. Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb990a105619dca3c3 # v4.4.2
         with:
           gradle-version: '9.3.1'
 
-      - name: 5. Restore Signing Keystore (Agar APK Bisa Meng-update Aplikasi Lama Tanpa Konflik)
-        run: |
-          if [ -f "debug.keystore.base64" ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
-            echo "debug.keystore berhasil dipulihkan dari debug.keystore.base64"
-          elif [ ! -f "debug.keystore" ]; then
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
-
-      - name: 6. Buat File .env dari GitHub Secrets & Metadata Release
+      - name: 6. Prepare Non-Secret Build Metadata (.env)
         env:
-          SECRET_METAAPI_ACCOUNT_ID: ${{ secrets.METAAPI_ACCOUNT_ID }}
-          SECRET_METAAPI_AUTH_TOKEN: ${{ secrets.METAAPI_AUTH_TOKEN }}
           CURRENT_REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
           RUN_NUM: ${{ github.run_number }}
         run: |
-          ACC_ID="${SECRET_METAAPI_ACCOUNT_ID:-YOUR_METAAPI_ACCOUNT_ID}"
-          TOKEN="${SECRET_METAAPI_AUTH_TOKEN:-YOUR_METAAPI_AUTH_TOKEN}"
-          VERSION_TAG="v1.0.${RUN_NUM}"
+          if [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION_TAG="${REF_NAME}"
+          else
+            VERSION_TAG="v1.0.${RUN_NUM}"
+          fi
           {
-            echo "METAAPI_ACCOUNT_ID=${ACC_ID}"
-            echo "METAAPI_AUTH_TOKEN=${TOKEN}"
             echo "GITHUB_REPOSITORY=${CURRENT_REPO}"
             echo "APP_RELEASE_TAG=${VERSION_TAG}"
           } > .env
-          echo "File .env berhasil disiapkan untuk BuildConfig (${CURRENT_REPO} @ ${VERSION_TAG})."
 
-      - name: 7. Build APK Debug (assembleDebug dengan Keystore Tetap & VersionCode Otomatis)
+      - name: 7. Run Secret Check, Lint & Unit Tests via Wrapper
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew
-            ./gradlew :app:assembleDebug --no-daemon --stacktrace
-          else
-            gradle :app:assembleDebug --no-daemon --stacktrace
-          fi
+          chmod +x ./gradlew
+          ./gradlew :app:verifyNoEmbeddedSecrets :app:lintDebug :app:testDebugUnitTest --no-daemon --stacktrace
 
-      - name: 8. Siapkan File APK Debug & Versi Release
+      - name: 8. Upload Test & Lint Reports
+        if: always()
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
+        with:
+          name: ci-reports-run-${{ github.run_number }}
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+
+  publish-release:
+    name: Build Signed Release APK & Publish GitHub Release
+    needs: ci-verify
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: 2. Setup JDK 21 (Temurin)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: 3. Configure Android SDK & Licenses
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          sudo mkdir -p "${SDK_DIR}/licenses" || mkdir -p "${SDK_DIR}/licenses"
+          sudo chown -R "$(id -u):$(id -g)" "${SDK_DIR}" || true
+          echo "ANDROID_HOME=${SDK_DIR}" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=${SDK_DIR}" >> "$GITHUB_ENV"
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "${SDK_DIR}/licenses/android-sdk-license"
+
+      - name: 4. Setup Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@017a9effdb900e5b5b2fddfb990a105619dca3c3 # v4.4.2
+        with:
+          gradle-version: '9.3.1'
+
+      - name: 5. Restore Production Release Signing Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -z "${KEYSTORE_BASE64}" ] || [ -z "${STORE_PASSWORD}" ] || [ -z "${KEY_PASSWORD}" ]; then
+            echo "ERROR: Production signing secrets (KEYSTORE_BASE64, STORE_PASSWORD, KEY_PASSWORD) are required."
+            exit 1
+          fi
+          echo "${KEYSTORE_BASE64}" | base64 -d > "${GITHUB_WORKSPACE}/my-upload-key.jks"
+          echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> "$GITHUB_ENV"
+
+      - name: 6. Prepare Non-Secret Release Metadata (.env)
+        env:
+          CURRENT_REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUM: ${{ github.run_number }}
+        run: |
+          if [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            VERSION_TAG="${REF_NAME}"
+          else
+            VERSION_TAG="v1.0.${RUN_NUM}"
+          fi
+          echo "VERSION_TAG=${VERSION_TAG}" >> "$GITHUB_ENV"
+          {
+            echo "GITHUB_REPOSITORY=${CURRENT_REPO}"
+            echo "APP_RELEASE_TAG=${VERSION_TAG}"
+          } > .env
+
+      - name: 7. Verify No Embedded Secrets & Assemble Signed Release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :app:verifyNoEmbeddedSecrets :app:assembleRelease --no-daemon --stacktrace
+
+      - name: 8. Package Release APK & Compute SHA-256 Checksum
         id: prepare_apk
         run: |
-          VERSION_TAG="v1.0.${{ github.run_number }}"
-          APK_NAME="HUB-Smart-Pattern-Engine-Pro-${VERSION_TAG}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "${APK_NAME}"
-          cp app/build/outputs/apk/debug/app-debug.apk "HUB-Smart-Pattern-Engine-Pro-latest.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk "app-debug.apk"
-          echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
-          echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "${APK_SRC}" ]; then
+            echo "ERROR: Expected signed release APK not found at ${APK_SRC}"
+            exit 1
+          fi
+          APK_NAME="Pattern-PRO-${VERSION_TAG}-release.apk"
+          cp "${APK_SRC}" "${APK_NAME}"
+          SHA256_SUM="$(sha256sum "${APK_NAME}" | awk '{print $1}')"
+          echo "${SHA256_SUM}  ${APK_NAME}" > "${APK_NAME}.sha256"
+          echo "apk_name=${APK_NAME}" >> "$GITHUB_OUTPUT"
+          echo "sha256=${SHA256_SUM}" >> "$GITHUB_OUTPUT"
 
-      - name: 9. Upload APK Debug ke GitHub Actions Artifacts
-        uses: actions/upload-artifact@v4
+      - name: 9. Cleanup Keystore Material from Workspace
+        if: always()
+        run: |
+          rm -f "${GITHUB_WORKSPACE}/my-upload-key.jks" .env
+
+      - name: 10. Upload Release Artifact & Checksum
+        uses: actions/upload-artifact@5d5d22a31266ced268874388b861e4b58bb5c2f3 # v4.3.1
         with:
-          name: APK-Debug-${{ steps.prepare_apk.outputs.version_tag }}
+          name: APK-Release-${{ env.VERSION_TAG }}
           path: |
-            app-debug.apk
             ${{ steps.prepare_apk.outputs.apk_name }}
-            HUB-Smart-Pattern-Engine-Pro-latest.apk
+            ${{ steps.prepare_apk.outputs.apk_name }}.sha256
           if-no-files-found: error
 
-      - name: 10. Publish Otomatis ke GitHub Releases
-        uses: softprops/action-gh-release@v2
+      - name: 11. Publish Signed Release to GitHub Releases
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
-          tag_name: ${{ steps.prepare_apk.outputs.version_tag }}
-          name: "Release ${{ steps.prepare_apk.outputs.version_tag }} — HUB Smart Pattern Engine Pro"
+          tag_name: ${{ env.VERSION_TAG }}
+          name: "Release ${{ env.VERSION_TAG }} — Pattern-PRO"
           body: |
-            ### Pembaruan Otomatis APK (${{ steps.prepare_apk.outputs.version_tag }})
+            ### Pembaruan Rilis APK (${{ env.VERSION_TAG }})
             - **Commit**: `${{ github.sha }}`
-            - **Catatan**: ${{ github.event.inputs.release_notes || 'Release otomatis setelah push ke GitHub.' }}
+            - **Catatan**: ${{ github.event.inputs.release_notes || 'Rilis terverifikasi CI (lint, unit test, secret scan).' }}
+            - **SHA-256 APK**: `${{ steps.prepare_apk.outputs.sha256 }}`
 
-            #### Cara Install / Update di HP Android Anda:
-            1. Unduh file **`${{ steps.prepare_apk.outputs.apk_name }}`** atau **`HUB-Smart-Pattern-Engine-Pro-latest.apk`** atau **`app-debug.apk`** di bawah ini.
-            2. Buka file APK tersebut untuk langsung meng-update aplikasi tanpa perlu menghapus aplikasi lama.
+            #### Verifikasi Integritas Unduhan:
+            Cocokkan hash SHA-256 APK terhadap file `.sha256` yang dilampirkan sebelum memasang pembaruan.
           files: |
-            app-debug.apk
             ${{ steps.prepare_apk.outputs.apk_name }}
-            HUB-Smart-Pattern-Engine-Pro-latest.apk
+            ${{ steps.prepare_apk.outputs.apk_name }}.sha256
           draft: false
           prerelease: false
           generate_release_notes: true

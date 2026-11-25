@@ -17,6 +17,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,18 +35,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Analytics
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CandlestickChart
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Newspaper
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -58,13 +64,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -405,7 +415,32 @@ fun HubSmartPatternApp() {
                     }
                 }
 
-                // PEMERIKSAAN #5 & #6: Tampilan Jujur Saat Provider Offline / Error (Tanpa Data Simulasi!)
+                // 1. Settings dan MQL5 Studio selalu dapat diakses pengguna kapanpun (bahkan saat feed pasar offline)
+                uiState.selectedTab == HubTab.SETTINGS -> {
+                    SettingsScreen(
+                        uiState = uiState,
+                        onSelectProvider = viewModel::selectProvider,
+                        onRunMultiProviderAudit = viewModel::runBackgroundMultiProviderAudit,
+                        onCleanAndResetSession = viewModel::cleanAndResetDataSession,
+                        onUpdateGitHubRepo = viewModel::updateGitHubRepoInput,
+                        onCheckGitHubUpdate = viewModel::checkGitHubReleaseUpdate,
+                        onToggleAllowOtaDowngrade = viewModel::toggleAllowOtaDowngrade,
+                        onUpdateMetaApiAccountId = viewModel::updateMetaApiAccountIdInput,
+                        onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
+                        onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
+                        onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials
+                    )
+                }
+
+                uiState.selectedTab == HubTab.MQL5_STUDIO -> {
+                    Mql5StudioScreen(
+                        config = uiState.mql5Config,
+                        generatedCode = uiState.generatedMql5Code,
+                        onUpdateConfig = viewModel::updateMql5Config
+                    )
+                }
+
+                // 2. PEMERIKSAAN JUJUR: Tampilan Saat Provider Offline / Kuota Habis (Untuk Tab Analisis Pasar)
                 analysis == null || !uiState.isProviderOnline -> {
                     HonestOfflineErrorState(
                         provider = uiState.selectedProvider,
@@ -414,6 +449,8 @@ fun HubSmartPatternApp() {
                             ?: "Provider tidak dapat dijangkau atau mengembalikan respons kosong.",
                         metaApiAccountId = uiState.metaApiAccountIdInput,
                         metaApiAuthToken = uiState.metaApiAuthTokenInput,
+                        savedAccountIdHint = uiState.savedMetaApiAccountIdHint,
+                        savedTokenHint = uiState.savedMetaApiTokenHint,
                         hasCustomSavedCredentials = uiState.hasCustomSavedCredentials,
                         onUpdateAccountId = viewModel::updateMetaApiAccountIdInput,
                         onUpdateAuthToken = viewModel::updateMetaApiAuthTokenInput,
@@ -484,10 +521,12 @@ fun HubSmartPatternApp() {
 
                         HubTab.SETTINGS -> SettingsScreen(
                             uiState = uiState,
+                            onSelectProvider = viewModel::selectProvider,
                             onRunMultiProviderAudit = viewModel::runBackgroundMultiProviderAudit,
                             onCleanAndResetSession = viewModel::cleanAndResetDataSession,
                             onUpdateGitHubRepo = viewModel::updateGitHubRepoInput,
                             onCheckGitHubUpdate = viewModel::checkGitHubReleaseUpdate,
+                            onToggleAllowOtaDowngrade = viewModel::toggleAllowOtaDowngrade,
                             onUpdateMetaApiAccountId = viewModel::updateMetaApiAccountIdInput,
                             onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
                             onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
@@ -507,6 +546,8 @@ private fun HonestOfflineErrorState(
     errorMessage: String,
     metaApiAccountId: String,
     metaApiAuthToken: String,
+    savedAccountIdHint: String,
+    savedTokenHint: String,
     hasCustomSavedCredentials: Boolean,
     onUpdateAccountId: (String) -> Unit,
     onUpdateAuthToken: (String) -> Unit,
@@ -515,194 +556,334 @@ private fun HonestOfflineErrorState(
     onRetry: () -> Unit,
     onSwitchProvider: (OnlineDataProvider) -> Unit
 ) {
+    var isOfflineTokenVisible by remember { mutableStateOf(false) }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(14.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 14.dp, vertical = 10.dp)
             .testTag("honest_offline_error_screen"),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.TopCenter
     ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = SlateSurface),
-            shape = RoundedCornerShape(18.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.5.dp, BearishCrimson, RoundedCornerShape(18.dp))
+                .padding(bottom = 36.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+            // CARD 1: STATUS ERROR & DETAIL KUOTA (Ringkas agar Solusi Cepat langsung terlihat)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, BearishCrimson, RoundedCornerShape(16.dp))
             ) {
-                Icon(
-                    imageVector = Icons.Default.CloudOff,
-                    contentDescription = "Provider Offline",
-                    tint = BearishCrimson,
-                    modifier = Modifier.size(42.dp)
-                )
-                Text(
-                    text = "STATUS: ${provider.shortLabel.uppercase()} OFFLINE",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = BearishCrimson,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Aplikasi beroperasi jujur (0% data palsu). Data pasar hanya ditampilkan jika server online aktif.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextPrimary
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(BearishBg.copy(alpha = 0.6f))
-                        .padding(10.dp)
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = "Endpoint: $endpointUrl",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = GoldBright
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CloudOff,
+                            contentDescription = "Provider Offline",
+                            tint = BearishCrimson,
+                            modifier = Modifier.size(24.dp)
                         )
                         Text(
-                            text = "Detail Error: $errorMessage",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = TextPrimary
+                            text = "STATUS: ${provider.displayName.uppercase()} OFFLINE",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = BearishCrimson,
+                            fontWeight = FontWeight.Bold
                         )
                     }
+                    Text(
+                        text = "Aplikasi beroperasi jujur (0% data palsu). Data pasar hanya ditampilkan jika server online aktif.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextPrimary,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BearishBg.copy(alpha = 0.6f))
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (endpointUrl.isNotBlank()) {
+                                Text(
+                                    text = "Endpoint: $endpointUrl",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = GoldBright,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Text(
+                                text = "Detail Error: $errorMessage",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextPrimary
+                            )
+                        }
+                    }
                 }
+            }
 
-                // Kotak Input Kredensial Langsung jika Provider adalah Elev8 MT5 (Disimpan Permanen di SharedPreferences)
-                if (provider == OnlineDataProvider.ELEV8_METAAPI) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = ObsidianBg),
+            // CARD 2: SOLUSI CEPAT: BERALIH KE PROVIDER PUBLIK GRATIS (LANGSUNG DI ATAS)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = SlateSurface),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, BullishEmerald, RoundedCornerShape(18.dp))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = GoldBright,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Text(
+                            text = "SOLUSI CEPAT: BERALIH KE SERVER AKTIF",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = GoldBright,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Text(
+                        text = "Server MetaApi Elev8 memiliki kuota CPU terbatas (HTTP 429). Anda dapat langsung beralih ke Server Publik Gratis tanpa batas kuota:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextPrimary
+                    )
+
+                    // Tombol Utama: Langsung Beralih ke Binance Vision (1 Tap)
+                    Button(
+                        onClick = { onSwitchProvider(OnlineDataProvider.BINANCE_VISION) },
+                        colors = ButtonDefaults.buttonColors(containerColor = BullishEmerald, contentColor = ObsidianBg),
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .border(1.dp, GoldPrimary.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                            .testTag("switch_to_binance_vision_fast")
                     ) {
-                        Column(
-                            modifier = Modifier.padding(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(vertical = 4.dp)
                         ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = "⚡ AKTIFKAN BINANCE VISION SEKARANG",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.ExtraBold
+                                )
+                                Text(
+                                    text = "Feed Proxy Real-Time • PAXG Spot (Gold) & EUR",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Atau Pilih Server Publik Lainnya:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = CyanSecondary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    // Daftar Provider Publik Alternatif
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OnlineDataProvider.realProviders.forEach { realProv ->
+                            val isSelected = realProv == provider
+                            OutlinedButton(
+                                onClick = { onSwitchProvider(realProv) },
+                                colors = ButtonDefaults.outlinedButtonColors(
+                                    containerColor = if (isSelected) GoldPrimary.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSelected) GoldPrimary else CyanSecondary.copy(alpha = 0.6f)
+                                ),
+                                modifier = Modifier.testTag("switch_to_${realProv.id}")
                             ) {
                                 Text(
-                                    text = "KREDENSIAL AKUN ELEV8 MT5 (SIMPAN PERMANEN)",
+                                    text = realProv.shortLabel,
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = GoldBright,
-                                    fontWeight = FontWeight.Bold
+                                    color = if (isSelected) GoldBright else CyanSecondary,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
-                                if (hasCustomSavedCredentials) {
-                                    Text(
-                                        text = "TERSIMPAN DI HP",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = BullishEmerald,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Kredensial Anda otomatis tersimpan di penyimpanan lokal HP sehingga tidak akan hilang saat aplikasi ditutup.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = TextSecondary
-                            )
-                            OutlinedTextField(
-                                value = metaApiAccountId,
-                                onValueChange = onUpdateAccountId,
-                                label = { Text("Account ID MetaApi (Elev8)", style = MaterialTheme.typography.labelSmall) },
-                                placeholder = { Text("Contoh: 2f0cba6a-da2e-415f-...", style = MaterialTheme.typography.labelSmall) },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("offline_account_id_input")
-                            )
-                            OutlinedTextField(
-                                value = metaApiAuthToken,
-                                onValueChange = onUpdateAuthToken,
-                                label = { Text("API Access Token MetaApi", style = MaterialTheme.typography.labelSmall) },
-                                placeholder = { Text("Token dari app.metaapi.cloud/token", style = MaterialTheme.typography.labelSmall) },
-                                singleLine = true,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("offline_auth_token_input")
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Button(
-                                    onClick = onSaveMetaApi,
-                                    colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("save_connect_metaapi_button")
-                                ) {
-                                    Text(
-                                        text = "SIMPAN & SAMBUNGKAN",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                if (hasCustomSavedCredentials || metaApiAccountId.isNotBlank()) {
-                                    OutlinedButton(
-                                        onClick = onClearMetaApi,
-                                        modifier = Modifier.testTag("offline_clear_metaapi_button")
-                                    ) {
-                                        Text(
-                                            text = "Hapus",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = BearishCrimson
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
+
+                    Button(
+                        onClick = onRetry,
+                        colors = ButtonDefaults.buttonColors(containerColor = CyanSecondary, contentColor = ObsidianBg),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("retry_online_button")
+                    ) {
+                        Text(
+                            text = "COBA SAMBUNGKAN KEMBALI",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
+            }
 
-                Text(
-                    text = "Atau Beralih ke Server Publik Gratis (Tanpa Akun):",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = CyanSecondary
-                )
-
-                Row(
+            // CARD 3: KREDENSIAL AKUN ELEV8 MT5 (TERENKRIPSI LOKAL)
+            if (provider == OnlineDataProvider.ELEV8_METAAPI) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = ObsidianBg),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        .border(1.dp, GoldPrimary.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
                 ) {
-                    OnlineDataProvider.realProviders.forEach { realProv ->
-                        OutlinedButton(
-                            onClick = { onSwitchProvider(realProv) },
-                            modifier = Modifier.testTag("switch_to_${realProv.id}")
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = realProv.shortLabel,
+                                text = "GANTI KREDENSIAL ELEV8 MT5",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = GoldBright,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (hasCustomSavedCredentials) {
+                                Text(
+                                    text = "TERSIMPAN (TERENKRIPSI)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = BullishEmerald,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                        Text(
+                            text = "Kredensial dienkripsi via Android Keystore (AES-256-GCM) secara lokal. Token tersimpan tidak ditampilkan ulang demi keamanan.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                        if (hasCustomSavedCredentials) {
+                            Text(
+                                text = "Tersimpan: Account $savedAccountIdHint • Token $savedTokenHint",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (realProv == provider) GoldBright else CyanSecondary
+                                color = BullishEmerald,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.testTag("offline_saved_credential_hint")
                             )
                         }
-                    }
-                }
+                        OutlinedTextField(
+                            value = metaApiAccountId,
+                            onValueChange = onUpdateAccountId,
+                            label = { Text("Account ID MetaApi Baru (Elev8)", style = MaterialTheme.typography.labelSmall) },
+                            placeholder = {
+                                Text(
+                                    text = if (hasCustomSavedCredentials) "Tersimpan: $savedAccountIdHint" else "Contoh: 2f0cba6a-da2e-415f-...",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("offline_account_id_input")
+                        )
+                        OutlinedTextField(
+                            value = metaApiAuthToken,
+                            onValueChange = onUpdateAuthToken,
+                            label = { Text("API Access Token MetaApi Baru", style = MaterialTheme.typography.labelSmall) },
+                            placeholder = {
+                                Text(
+                                    text = if (hasCustomSavedCredentials) "Token tersimpan: $savedTokenHint" else "Token dari app.metaapi.cloud/token",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            },
+                            visualTransformation = if (isOfflineTokenVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { isOfflineTokenVisible = !isOfflineTokenVisible },
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("offline_toggle_token_visibility")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isOfflineTokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (isOfflineTokenVisible) "Sembunyikan Token" else "Tampilkan Token Sementara",
+                                        tint = CyanSecondary
+                                    )
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("offline_auth_token_input")
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = onSaveMetaApi,
+                                colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary, contentColor = ObsidianBg),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("save_connect_metaapi_button")
+                            ) {
+                                Text(
+                                    text = "SIMPAN & SAMBUNGKAN",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
 
-                Button(
-                    onClick = onRetry,
-                    colors = ButtonDefaults.buttonColors(containerColor = CyanSecondary, contentColor = ObsidianBg),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("retry_online_button")
-                ) {
-                    Text(
-                        text = "COBA HUBUNGKAN ULANG",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                            if (hasCustomSavedCredentials || metaApiAccountId.isNotBlank()) {
+                                OutlinedButton(
+                                    onClick = onClearMetaApi,
+                                    modifier = Modifier.testTag("offline_clear_metaapi_button")
+                                ) {
+                                    Text(
+                                        text = "Hapus",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = BearishCrimson
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

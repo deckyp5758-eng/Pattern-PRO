@@ -1,6 +1,11 @@
 package com.example.data.remote
 
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import com.example.BuildConfig
+import com.example.data.local.UserPreferencesManager
+import com.example.model.BrokerContractSpec
 import com.example.model.MacroNewsArticle
 import com.example.model.MacroSentiment
 import com.example.model.MarketSymbol
@@ -16,13 +21,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.net.URI
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
-import com.example.data.local.UserPreferencesManager
 
 class LiveMarketAndNewsService(
     private val preferencesManager: UserPreferencesManager? = null
@@ -40,7 +47,8 @@ class LiveMarketAndNewsService(
             val endpointUrl: String,
             val httpStatusCode: Int,
             val serverFetchTimestampMs: Long,
-            val latestBarTimestampSec: Long
+            val latestBarTimestampSec: Long,
+            val brokerContractSpec: BrokerContractSpec? = null
         ) : RatesFetchOutcome()
 
         data class Error(
@@ -156,9 +164,9 @@ class LiveMarketAndNewsService(
         return when (provider) {
             OnlineDataProvider.ELEV8_METAAPI -> {
                 val region = discoveredMetaApiRegion ?: getMetaApiRegion()
-                val accId = getMetaApiAccountId().ifEmpty { "ACCOUNT_ID" }
+                val maskedAcc = maskCredentialId(getMetaApiAccountId()).ifEmpty { "ACCOUNT_ID" }
                 val symWithSuffix = discoveredElev8Symbol[symbol] ?: getElev8SymbolWithSuffix(symbol)
-                "https://mt-market-data-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$accId/historical-market-data/symbols/$symWithSuffix/timeframes/${timeframe.binanceInterval}/candles?limit=500"
+                "https://mt-market-data-client-api-v1.$region.agiliumtrade.ai/users/current/accounts/$maskedAcc/historical-market-data/symbols/$symWithSuffix/timeframes/${timeframe.binanceInterval}/candles?limit=500"
             }
             OnlineDataProvider.BINANCE_VISION -> {
                 val ticker = if (symbol == MarketSymbol.XAUUSD) "PAXGUSDT" else "EURUSDT"
@@ -206,6 +214,8 @@ class LiveMarketAndNewsService(
     private var discoveredMetaApiRegion: String? = null
 
     private val discoveredElev8Symbol = java.util.concurrent.ConcurrentHashMap<MarketSymbol, String>()
+    private val discoveredContractSpecs = java.util.concurrent.ConcurrentHashMap<String, BrokerContractSpec>()
+    private val discoveredAccountCurrency = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     @Volatile
     private var customMetaApiAccountId: String? = null
@@ -240,6 +250,8 @@ class LiveMarketAndNewsService(
             customMetaApiRegion = cleanReg
             discoveredMetaApiRegion = cleanReg
         }
+        discoveredContractSpecs.clear()
+        discoveredAccountCurrency.clear()
         preferencesManager?.saveMetaApiCredentials(cleanAcc, cleanTok, cleanReg)
     }
 
@@ -249,6 +261,8 @@ class LiveMarketAndNewsService(
         customMetaApiRegion = null
         discoveredMetaApiRegion = null
         discoveredElev8Symbol.clear()
+        discoveredContractSpecs.clear()
+        discoveredAccountCurrency.clear()
         preferencesManager?.clearMetaApiCredentials()
     }
 
@@ -374,12 +388,85 @@ class LiveMarketAndNewsService(
         return null
     }
 
+    private fun fetchBrokerContractSpecIfNeeded(
+        clientDomain: String,
+        region: String,
+        accountId: String,
+        authToken: String,
+        encodedSym: String,
+        rawSym: String,
+        symbol: MarketSymbol
+    ): BrokerContractSpec? {
+        val cacheKey = "${accountId.hashCode()}:${symbol.code}:$rawSym"
+        discoveredContractSpecs[cacheKey]?.let { return it }
+
+        val accountCurrency = discoveredAccountCurrency[accountId.hashCode().toString()] ?: runCatching {
+            val accReq = Request.Builder()
+                .url("$clientDomain/users/current/accounts/$accountId/account-information")
+                .header("auth-token", authToken)
+                .header("Accept", "application/json")
+                .build()
+            okHttpClient.newCall(accReq).execute().use { resp ->
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string().orEmpty()
+                    if (body.isNotBlank()) {
+                        JSONObject(body).optString("currency", "USD").trim().ifEmpty { "USD" }
+                    } else "USD"
+                } else "USD"
+            }
+        }.getOrDefault("USD").also {
+            discoveredAccountCurrency[accountId.hashCode().toString()] = it
+        }
+
+        val spec = runCatching {
+            val specUrl = "$clientDomain/users/current/accounts/$accountId/symbols/$encodedSym/specification"
+            val specReq = Request.Builder()
+                .url(specUrl)
+                .header("auth-token", authToken)
+                .header("Accept", "application/json")
+                .build()
+            okHttpClient.newCall(specReq).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body?.string().orEmpty()
+                if (body.isBlank()) return@use null
+                val json = JSONObject(body)
+                val contractSize = json.optDouble("contractSize", -1.0)
+                val tickSize = json.optDouble("tickSize", -1.0)
+                val tickValue = json.optDouble("tickValue", -1.0)
+                val minVol = json.optDouble("minVolume", 0.01).takeIf { it > 0.0 } ?: 0.01
+                val maxVol = json.optDouble("maxVolume", 100.0).takeIf { it > 0.0 } ?: 100.0
+                val volStep = json.optDouble("volumeStep", 0.01).takeIf { it > 0.0 } ?: 0.01
+
+                if (contractSize > 0.0 && tickSize > 0.0 && tickValue > 0.0) {
+                    BrokerContractSpec(
+                        brokerSymbol = rawSym,
+                        accountCurrency = accountCurrency,
+                        contractSize = contractSize,
+                        tickSize = tickSize,
+                        tickValue = tickValue,
+                        minVolume = minVol,
+                        maxVolume = maxVol,
+                        volumeStep = volStep,
+                        isBrokerVerified = true
+                    )
+                } else {
+                    null
+                }
+            }
+        }.getOrNull()
+
+        if (spec != null) {
+            discoveredContractSpecs[cacheKey] = spec
+        }
+        return spec
+    }
+
     /**
      * Konektor Resmi Elev8 MT5 Cloud via MetaApi:
      * - Historical Candles: mt-market-data-client-api-v1.<region>.agiliumtrade.ai (dan fallback agiliumtrade.agiliumtrade.ai)
      * - Current Candle [0] & Symbols: mt-client-api-v1.<region>.agiliumtrade.ai (dan fallback agiliumtrade.agiliumtrade.ai)
      * - Jika kredensial belum diisi atau masa uji coba habis (HTTP 401/402/403/404/429),
-     *   mengembalikan status OFFLINE secara jujur dengan pesan edukatif.
+     *   mengembalikan status OFFLINE secara jujur tanpa membocorkan token/accountId mentah.
      */
     private suspend fun fetchElev8MetaApiRates(
         symbol: MarketSymbol,
@@ -427,7 +514,8 @@ class LiveMarketAndNewsService(
                 for ((marketDataDomain, clientDomain) in domainCandidates) {
                     val histUrl = "$marketDataDomain/users/current/accounts/$accountId/historical-market-data/symbols/$encodedSym/timeframes/$tfParam/candles?limit=500"
                     val currentUrl = "$clientDomain/users/current/accounts/$accountId/symbols/$encodedSym/current-candles/$tfParam?keepSubscription=true"
-                    lastUrl = histUrl
+                    val redactedHistUrl = redactSensitiveUrl(histUrl, accountId)
+                    lastUrl = redactedHistUrl
 
                     try {
                         val histReq = Request.Builder()
@@ -445,7 +533,6 @@ class LiveMarketAndNewsService(
                                 discoveredMetaApiRegion = region
                                 discoveredElev8Symbol[symbol] = rawSym
 
-                                // Ambil juga current-candle [0] yang sedang berjalan di MT5 Elev8 (best-effort)
                                 val currentCandleJson = runCatching {
                                     val curReq = Request.Builder()
                                         .url(currentUrl)
@@ -459,22 +546,32 @@ class LiveMarketAndNewsService(
 
                                 val parsedBars = parseMetaApiCandlesJson(bodyStr, currentCandleJson, symbol, timeframe)
                                 if (parsedBars.size >= 30) {
+                                    val contractSpec = fetchBrokerContractSpecIfNeeded(
+                                        clientDomain = clientDomain,
+                                        region = region,
+                                        accountId = accountId,
+                                        authToken = authToken,
+                                        encodedSym = encodedSym,
+                                        rawSym = rawSym,
+                                        symbol = symbol
+                                    )
                                     return@withPermit RatesFetchOutcome.Success(
                                         bars = parsedBars,
                                         provider = OnlineDataProvider.ELEV8_METAAPI,
-                                        endpointUrl = histUrl,
+                                        endpointUrl = redactedHistUrl,
                                         httpStatusCode = code,
                                         serverFetchTimestampMs = fetchTimeMs,
-                                        latestBarTimestampSec = parsedBars.first().timeEpochSec
+                                        latestBarTimestampSec = parsedBars.first().timeEpochSec,
+                                        brokerContractSpec = contractSpec
                                     )
                                 } else {
                                     lastErrorMsg = "Server MT5 Elev8 ($region) hanya mengembalikan ${parsedBars.size} candle untuk $rawSym."
                                 }
                             } else {
-                                val snippet = bodyStr.take(180)
+                                val snippet = sanitizeSensitiveText(bodyStr.take(180), accountId, authToken)
                                 lastErrorMsg = when (code) {
                                     401 -> "OFFLINE (HTTP 401) — Token MetaApi tidak valid atau kedaluwarsa. Periksa token di akun app.metaapi.cloud."
-                                    402, 403, 429 -> "OFFLINE (HTTP $code) — Kuota Gratis 17 Hari / Kredit CPU MetaApi Habis. Silakan Top-Up saldo di https://app.metaapi.cloud agar server MT5 Elev8 kembali Online."
+                                    402, 403, 429 -> "OFFLINE (HTTP $code) — Kuota Gratis 17 Hari / Kredit CPU MetaApi Habis. Silakan Top-Up saldo di https://app.metaapi.cloud atau beralih ke Server Publik Gratis."
                                     404 -> "OFFLINE (HTTP 404) — Akun MT5 Elev8 berstatus UNDEPLOYED di app.metaapi.cloud atau simbol '$rawSym' tidak ditemukan. Pastikan akun berstatus DEPLOYED & CONNECTED."
                                     else -> "OFFLINE (HTTP $code) dari Elev8 MT5 ($region): $snippet"
                                 }
@@ -484,7 +581,12 @@ class LiveMarketAndNewsService(
                             }
                         }
                     } catch (e: Exception) {
-                        lastErrorMsg = "${e.javaClass.simpleName}: ${e.localizedMessage ?: "Gagal menghubungi server MetaApi ($region)"}"
+                        val safeErr = sanitizeSensitiveText(
+                            e.localizedMessage ?: "Gagal menghubungi server MetaApi ($region)",
+                            accountId,
+                            authToken
+                        )
+                        lastErrorMsg = "${e.javaClass.simpleName}: $safeErr"
                     }
                     if (lastHttpCode == 401 || lastHttpCode == 402 || lastHttpCode == 429) {
                         break
@@ -504,7 +606,7 @@ class LiveMarketAndNewsService(
             endpointUrl = lastUrl,
             httpStatusCode = lastHttpCode,
             errorMessage = lastErrorMsg.ifEmpty {
-                "OFFLINE — Tidak dapat menjangkau server Elev8 MT5 (MetaApi). Periksa status DEPLOYED atau Top-Up kuota di app.metaapi.cloud."
+                "OFFLINE — Tidak dapat menjangkau server Elev8 MT5 (MetaApi). Periksa status DEPLOYED atau beralih ke Server Publik Gratis."
             },
             failedAtMs = fetchTimeMs
         )
@@ -1183,19 +1285,282 @@ class LiveMarketAndNewsService(
         return (value * factor).roundToInt() / factor
     }
 
-    fun getDefaultGitHubRepository(): String {
-        val saved = preferencesManager?.getGitHubRepository().orEmpty()
-        if (saved.isNotBlank()) return saved
-        val raw = runCatching { BuildConfig.GITHUB_REPOSITORY }.getOrDefault("").trim()
-        return if (raw.isEmpty() || raw.startsWith("YOUR_GITHUB_USER") || raw == "null") {
-            ""
-        } else {
-            raw
+    companion object {
+        const val OFFICIAL_GITHUB_REPO = "deckyp5758-eng/Pattern-PRO"
+        private val REPO_SLUG_REGEX = Regex("""^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$""")
+        private val SEMVER_REGEX = Regex("""^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$""")
+        private val SHA256_HEX_REGEX = Regex("""\b([0-9a-fA-F]{64})\b""")
+        private val ALLOWED_OTA_HOSTS = setOf(
+            "github.com",
+            "objects.githubusercontent.com",
+            "release-assets.githubusercontent.com"
+        )
+
+        fun maskCredentialId(id: String): String {
+            val clean = id.trim()
+            if (clean.isEmpty()) return ""
+            return if (clean.length <= 4) "****" else "****${clean.takeLast(4)}"
+        }
+
+        fun redactSensitiveUrl(url: String, accountId: String): String {
+            if (accountId.isBlank()) return url
+            return url.replace(accountId, maskCredentialId(accountId))
+        }
+
+        fun sanitizeSensitiveText(text: String, accountId: String, authToken: String): String {
+            var sanitized = text
+            if (accountId.isNotBlank()) {
+                sanitized = sanitized.replace(accountId, maskCredentialId(accountId))
+            }
+            if (authToken.isNotBlank()) {
+                sanitized = sanitized.replace(authToken, "[REDACTED]")
+            }
+            return sanitized
+        }
+
+        fun normalizeRepoSlug(rawInput: String): String {
+            return rawInput.trim()
+                .removePrefix("https://github.com/")
+                .removePrefix("http://github.com/")
+                .removeSuffix(".git")
+                .trim('/')
+        }
+
+        fun parseSemVer(tag: String): Triple<Int, Int, Int>? {
+            val match = SEMVER_REGEX.matchEntire(tag.trim()) ?: return null
+            val major = match.groupValues[1].toIntOrNull() ?: return null
+            val minor = match.groupValues[2].toIntOrNull() ?: return null
+            val patch = match.groupValues[3].toIntOrNull() ?: return null
+            return Triple(major, minor, patch)
+        }
+
+        /**
+         * Returns >0 if candidate > installed, 0 if equal, <0 if candidate < installed (downgrade).
+         * Returns null if either version is non-SemVer.
+         */
+        fun compareSemVerTags(candidateTag: String, installedTag: String): Int? {
+            val cand = parseSemVer(candidateTag) ?: return null
+            val inst = parseSemVer(installedTag) ?: return null
+            if (cand.first != inst.first) return cand.first.compareTo(inst.first)
+            if (cand.second != inst.second) return cand.second.compareTo(inst.second)
+            return cand.third.compareTo(inst.third)
+        }
+
+        fun isTrustedOtaDownloadUrl(url: String): Boolean {
+            if (url.isBlank()) return false
+            return runCatching {
+                val uri = URI(url.trim())
+                val host = uri.host?.lowercase(Locale.US).orEmpty()
+                uri.scheme.equals("https", ignoreCase = true) && host in ALLOWED_OTA_HOSTS
+            }.getOrDefault(false)
+        }
+
+        fun evaluateReleaseMetadata(
+            cleanRepo: String,
+            allowedRepos: Set<String>,
+            installedTag: String,
+            latestTag: String,
+            releaseTitle: String,
+            releaseNotes: String,
+            publishedAt: String,
+            htmlUrl: String,
+            apkUrl: String,
+            apkName: String,
+            apkSizeMb: Double,
+            expectedSha256: String,
+            sha256AssetName: String,
+            allowDowngrade: Boolean
+        ): com.example.model.GitHubReleaseInfo {
+            if (!REPO_SLUG_REGEX.matches(cleanRepo) || cleanRepo !in allowedRepos) {
+                return com.example.model.GitHubReleaseInfo(
+                    repository = cleanRepo,
+                    installedTag = installedTag,
+                    isChecking = false,
+                    statusMessage = "Ditolak: Repositori OTA harus sesuai owner/repo resmi (${allowedRepos.first()})."
+                )
+            }
+
+            if (apkUrl.isBlank()) {
+                return com.example.model.GitHubReleaseInfo(
+                    repository = cleanRepo,
+                    installedTag = installedTag,
+                    latestTag = latestTag,
+                    releaseTitle = releaseTitle,
+                    releaseNotes = releaseNotes,
+                    publishedAt = publishedAt,
+                    htmlReleaseUrl = htmlUrl,
+                    isChecking = false,
+                    statusMessage = "Release $latestTag ditemukan, namun belum ada file .apk terlampir."
+                )
+            }
+
+            if (!isTrustedOtaDownloadUrl(apkUrl)) {
+                return com.example.model.GitHubReleaseInfo(
+                    repository = cleanRepo,
+                    installedTag = installedTag,
+                    latestTag = latestTag,
+                    htmlReleaseUrl = htmlUrl,
+                    isChecking = false,
+                    statusMessage = "Ditolak: URL unduhan APK bukan berasal dari host HTTPS GitHub yang terpercaya."
+                )
+            }
+
+            val semVerCmp = compareSemVerTags(latestTag, installedTag)
+            val isDowngrade = semVerCmp != null && semVerCmp < 0
+            val isSameOrUnparseable = semVerCmp == null || semVerCmp == 0
+            val isUpdateAllowed = when {
+                semVerCmp == null -> false
+                semVerCmp > 0 -> true
+                isDowngrade && allowDowngrade -> true
+                else -> false
+            }
+
+            val checksumWarning = if (expectedSha256.isBlank()) {
+                " Peringatan: File/hash .sha256 tidak ditemukan pada rilis ini; verifikasi integritas otomatis tidak tersedia."
+            } else {
+                " Checksum SHA-256 tersedia (${expectedSha256.take(12)}…)."
+            }
+
+            val statusMsg = when {
+                semVerCmp == null ->
+                    "Tag rilis '$latestTag' tidak berformat SemVer yang valid (vX.Y.Z); pembaruan ditahan."
+                isDowngrade && !allowDowngrade ->
+                    "Downgrade diblokir: Versi rilis ($latestTag) lebih lama daripada terpasang ($installedTag). Aktifkan izin downgrade secara eksplisit jika benar-benar diperlukan."
+                isDowngrade && allowDowngrade ->
+                    "Peringatan Rollback Eksplisit: Versi rilis ($latestTag) lebih lama dari terpasang ($installedTag).$checksumWarning"
+                semVerCmp > 0 ->
+                    "Tersedia pembaruan APK versi $latestTag di GitHub Releases.$checksumWarning"
+                isSameOrUnparseable ->
+                    "Aplikasi sudah berada di versi terbaru ($installedTag).$checksumWarning"
+                else ->
+                    "Aplikasi sudah berada di versi terbaru ($installedTag)."
+            }
+
+            return com.example.model.GitHubReleaseInfo(
+                repository = cleanRepo,
+                installedTag = installedTag,
+                latestTag = latestTag,
+                releaseTitle = releaseTitle,
+                releaseNotes = releaseNotes,
+                publishedAt = publishedAt,
+                apkDownloadUrl = if (isDowngrade && !allowDowngrade) "" else apkUrl,
+                apkFileName = apkName,
+                apkSizeMb = apkSizeMb,
+                htmlReleaseUrl = htmlUrl,
+                isUpdateAvailable = isUpdateAllowed,
+                isChecking = false,
+                statusMessage = statusMsg,
+                expectedSha256 = expectedSha256,
+                sha256AssetName = sha256AssetName,
+                isChecksumAvailable = expectedSha256.isNotBlank(),
+                isDowngradeDetected = isDowngrade
+            )
+        }
+
+        fun computeFileSha256(file: File): String {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
+
+        fun verifyApkSha256AndSignature(
+            context: Context,
+            apkFile: File,
+            expectedSha256: String
+        ): Pair<Boolean, String> {
+            if (!apkFile.exists()) return false to "File APK tidak ditemukan."
+            if (expectedSha256.isNotBlank()) {
+                val actual = computeFileSha256(apkFile)
+                if (!actual.equals(expectedSha256.trim(), ignoreCase = true)) {
+                    return false to "Verifikasi SHA-256 gagal! Hash file tidak cocok dengan rilis."
+                }
+            } else {
+                return false to "Hash SHA-256 tidak tersedia sehingga integritas file APK tidak dapat diverifikasi."
+            }
+
+            val pm = context.packageManager
+            val installedCertSha = getInstalledPackageSigningSha256(pm, context.packageName)
+            val archiveCertSha = getApkArchiveSigningSha256(pm, apkFile.absolutePath)
+            if (installedCertSha.isEmpty() || archiveCertSha.isEmpty()) {
+                return false to "Sertifikat penandatangan APK tidak dapat dibaca untuk verifikasi."
+            }
+            if (!installedCertSha.equals(archiveCertSha, ignoreCase = true)) {
+                return false to "Sertifikat penandatangan APK rilis TIDAK cocok dengan aplikasi terpasang!"
+            }
+            return true to "Integritas SHA-256 dan sertifikat penandatangan APK terverifikasi."
+        }
+
+        @Suppress("DEPRECATION")
+        private fun getInstalledPackageSigningSha256(pm: PackageManager, pkgName: String): String {
+            return runCatching {
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                } else {
+                    PackageManager.GET_SIGNATURES
+                }
+                val info = pm.getPackageInfo(pkgName, flags)
+                extractSigningSha256(info)
+            }.getOrDefault("")
+        }
+
+        @Suppress("DEPRECATION")
+        private fun getApkArchiveSigningSha256(pm: PackageManager, apkPath: String): String {
+            return runCatching {
+                val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                } else {
+                    PackageManager.GET_SIGNATURES
+                }
+                val info = pm.getPackageArchiveInfo(apkPath, flags) ?: return ""
+                extractSigningSha256(info)
+            }.getOrDefault("")
+        }
+
+        @Suppress("DEPRECATION")
+        private fun extractSigningSha256(info: android.content.pm.PackageInfo): String {
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.signingInfo?.apkContentsSigners
+            } else {
+                info.signatures
+            }
+            val firstCert = signatures?.firstOrNull()?.toByteArray() ?: return ""
+            val digest = MessageDigest.getInstance("SHA-256").digest(firstCert)
+            return digest.joinToString("") { "%02x".format(it) }
         }
     }
 
+    fun getPinnedOfficialRepository(): String {
+        val raw = runCatching { BuildConfig.GITHUB_REPOSITORY }.getOrDefault("").trim()
+        val normalized = normalizeRepoSlug(raw)
+        return if (REPO_SLUG_REGEX.matches(normalized) && !normalized.startsWith("YOUR_GITHUB_USER")) {
+            normalized
+        } else {
+            OFFICIAL_GITHUB_REPO
+        }
+    }
+
+    fun getAllowedOtaRepositories(): Set<String> {
+        return setOf(OFFICIAL_GITHUB_REPO, getPinnedOfficialRepository())
+    }
+
+    fun getDefaultGitHubRepository(): String {
+        val saved = normalizeRepoSlug(preferencesManager?.getGitHubRepository().orEmpty())
+        if (saved.isNotBlank() && saved in getAllowedOtaRepositories()) return saved
+        return getPinnedOfficialRepository()
+    }
+
     fun saveCustomGitHubRepository(repo: String) {
-        preferencesManager?.saveGitHubRepository(repo)
+        val normalized = normalizeRepoSlug(repo)
+        if (normalized in getAllowedOtaRepositories()) {
+            preferencesManager?.saveGitHubRepository(normalized)
+        }
     }
 
     fun getInstalledReleaseTag(): String {
@@ -1203,21 +1568,21 @@ class LiveMarketAndNewsService(
         return if (raw.isEmpty() || raw == "null") "v1.0.0" else raw
     }
 
-    suspend fun checkLatestGitHubRelease(repoInput: String): com.example.model.GitHubReleaseInfo =
+    suspend fun checkLatestGitHubRelease(
+        repoInput: String,
+        allowDowngrade: Boolean = false
+    ): com.example.model.GitHubReleaseInfo =
         withContext(Dispatchers.IO) {
             val installedTag = getInstalledReleaseTag()
-            val cleanRepo = repoInput.trim()
-                .removePrefix("https://github.com/")
-                .removePrefix("http://github.com/")
-                .removeSuffix(".git")
-                .trim('/')
+            val cleanRepo = normalizeRepoSlug(repoInput)
+            val allowedRepos = getAllowedOtaRepositories()
 
-            if (!cleanRepo.contains("/") || cleanRepo.startsWith("YOUR_GITHUB_USER")) {
+            if (!REPO_SLUG_REGEX.matches(cleanRepo) || cleanRepo !in allowedRepos) {
                 return@withContext com.example.model.GitHubReleaseInfo(
                     repository = cleanRepo,
                     installedTag = installedTag,
                     isChecking = false,
-                    statusMessage = "Masukkan nama repositori GitHub Anda dengan format: username/nama-repo"
+                    statusMessage = "Ditolak: OTA hanya mengizinkan repositori resmi (${getPinnedOfficialRepository()})."
                 )
             }
 
@@ -1235,7 +1600,7 @@ class LiveMarketAndNewsService(
                     val body = response.body?.string().orEmpty()
                     if (!response.isSuccessful) {
                         val msg = if (code == 404) {
-                            "Belum ada Release di GitHub ($cleanRepo) atau repositori bersifat Private. Push kode ke branch main untuk memicu GitHub Actions Release otomatis."
+                            "Belum ada Release di GitHub ($cleanRepo) atau repositori bersifat Private."
                         } else {
                             "Gagal memeriksa GitHub Releases (HTTP $code)."
                         }
@@ -1257,44 +1622,60 @@ class LiveMarketAndNewsService(
                     var apkUrl = ""
                     var apkName = ""
                     var apkSizeMb = 0.0
+                    var shaUrl = ""
+                    var shaName = ""
                     val assets = json.optJSONArray("assets")
                     if (assets != null) {
                         for (i in 0 until assets.length()) {
                             val asset = assets.getJSONObject(i)
                             val name = asset.optString("name", "")
                             val downloadUrl = asset.optString("browser_download_url", "")
-                            if (name.endsWith(".apk", ignoreCase = true) && downloadUrl.isNotBlank()) {
+                            if (name.endsWith(".apk", ignoreCase = true) && downloadUrl.isNotBlank() && apkUrl.isBlank()) {
                                 apkUrl = downloadUrl
                                 apkName = name
                                 apkSizeMb = roundToDigits(asset.optLong("size", 0L) / (1024.0 * 1024.0), 2)
-                                if (!name.contains("latest", ignoreCase = true)) {
-                                    break
-                                }
+                            } else if (name.endsWith(".sha256", ignoreCase = true) && downloadUrl.isNotBlank() && shaUrl.isBlank()) {
+                                shaUrl = downloadUrl
+                                shaName = name
                             }
                         }
                     }
 
-                    val isNewer = latestTag.isNotBlank() && latestTag != installedTag
-                    val statusMsg = when {
-                        apkUrl.isBlank() -> "Release $latestTag ditemukan, namun belum ada file .apk terlampir."
-                        isNewer -> "Tersedia pembaruan APK versi $latestTag di GitHub Releases! Ketuk Unduh APK untuk memperbarui."
-                        else -> "Aplikasi sudah berada di versi terbaru ($installedTag). Anda tetap dapat mengunduh ulang APK."
+                    var expectedSha256 = ""
+                    if (shaUrl.isNotBlank() && isTrustedOtaDownloadUrl(shaUrl)) {
+                        runCatching {
+                            val shaReq = Request.Builder()
+                                .url(shaUrl)
+                                .header("User-Agent", "HUB-SmartPatternEnginePro/1.0 (Android OTA Updater)")
+                                .get()
+                                .build()
+                            okHttpClient.newCall(shaReq).execute().use { shaResp ->
+                                if (shaResp.isSuccessful) {
+                                    val shaBody = shaResp.body?.string().orEmpty()
+                                    expectedSha256 = SHA256_HEX_REGEX.find(shaBody)?.groupValues?.get(1).orEmpty().lowercase(Locale.US)
+                                }
+                            }
+                        }
+                    }
+                    if (expectedSha256.isBlank()) {
+                        expectedSha256 = SHA256_HEX_REGEX.find(notes)?.groupValues?.get(1).orEmpty().lowercase(Locale.US)
                     }
 
-                    com.example.model.GitHubReleaseInfo(
-                        repository = cleanRepo,
+                    evaluateReleaseMetadata(
+                        cleanRepo = cleanRepo,
+                        allowedRepos = allowedRepos,
                         installedTag = installedTag,
                         latestTag = latestTag,
                         releaseTitle = title,
                         releaseNotes = notes,
                         publishedAt = publishedAt,
-                        apkDownloadUrl = apkUrl,
-                        apkFileName = apkName,
+                        htmlUrl = htmlUrl,
+                        apkUrl = apkUrl,
+                        apkName = apkName,
                         apkSizeMb = apkSizeMb,
-                        htmlReleaseUrl = htmlUrl,
-                        isUpdateAvailable = isNewer,
-                        isChecking = false,
-                        statusMessage = statusMsg
+                        expectedSha256 = expectedSha256,
+                        sha256AssetName = shaName,
+                        allowDowngrade = allowDowngrade
                     )
                 }
             } catch (e: Exception) {
