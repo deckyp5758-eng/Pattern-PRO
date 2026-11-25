@@ -145,7 +145,8 @@ fun HudTerminalScreen(
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 14.dp),
+            .padding(horizontal = 14.dp)
+            .testTag("hud_terminal_list"),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item { Spacer(modifier = Modifier.height(4.dp)) }

@@ -1,16 +1,18 @@
 package com.example
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
 import android.os.Looper
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.room.Room
-import androidx.sqlite.db.framework.FrameworkSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.HubRepository
 import com.example.data.local.HubDatabase
@@ -213,58 +215,61 @@ class Priority1And2FeatureTest {
     fun test04_roomMigration1To2_preservesLegacyRowsAndAppliesDefaults() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val dbName = "migration_1_2_test_${System.nanoTime()}.db"
-        val helper = object : SQLiteOpenHelper(context, dbName, null, 1) {
-            override fun onCreate(db: SQLiteDatabase) {
-                db.execSQL(
-                    """
-                    CREATE TABLE IF NOT EXISTS `closed_candle_signal_logs` (
-                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                        `symbolWithSuffix` TEXT NOT NULL,
-                        `timeframeLabel` TEXT NOT NULL,
-                        `closedBarEpochSec` INTEGER NOT NULL,
-                        `closePrice` REAL NOT NULL,
-                        `verdictLabel` TEXT NOT NULL,
-                        `patternDetected` TEXT NOT NULL,
-                        `structureLabel` TEXT NOT NULL,
-                        `trendLabel` TEXT NOT NULL,
-                        `rsi14` REAL NOT NULL,
-                        `adx14` REAL NOT NULL,
-                        `atr14` REAL NOT NULL,
-                        `stopReferencePrice` REAL NOT NULL,
-                        `targetReferencePrice` REAL NOT NULL,
-                        `confluenceScore` INTEGER NOT NULL,
-                        `savedTimestampMs` INTEGER NOT NULL
+        val factory = FrameworkSQLiteOpenHelperFactory()
+        val configV1 = SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name(dbName)
+            .callback(object : SupportSQLiteOpenHelper.Callback(1) {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        """
+                        CREATE TABLE IF NOT EXISTS `closed_candle_signal_logs` (
+                            `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                            `symbolWithSuffix` TEXT NOT NULL,
+                            `timeframeLabel` TEXT NOT NULL,
+                            `closedBarEpochSec` INTEGER NOT NULL,
+                            `closePrice` REAL NOT NULL,
+                            `verdictLabel` TEXT NOT NULL,
+                            `patternDetected` TEXT NOT NULL,
+                            `structureLabel` TEXT NOT NULL,
+                            `trendLabel` TEXT NOT NULL,
+                            `rsi14` REAL NOT NULL,
+                            `adx14` REAL NOT NULL,
+                            `atr14` REAL NOT NULL,
+                            `stopReferencePrice` REAL NOT NULL,
+                            `targetReferencePrice` REAL NOT NULL,
+                            `confluenceScore` INTEGER NOT NULL,
+                            `savedTimestampMs` INTEGER NOT NULL
+                        )
+                        """.trimIndent()
                     )
-                    """.trimIndent()
-                )
-                db.execSQL(
-                    """
-                    INSERT INTO closed_candle_signal_logs (
-                        symbolWithSuffix, timeframeLabel, closedBarEpochSec, closePrice,
-                        verdictLabel, patternDetected, structureLabel, trendLabel,
-                        rsi14, adx14, atr14, stopReferencePrice, targetReferencePrice,
-                        confluenceScore, savedTimestampMs
-                    ) VALUES (
-                        'XAUUSD.sml', 'M15', 1727000000, 2655.5,
-                        'KONFLUENSI NAIK KUAT (BULLISH) [CANDLE 1]', 'Bullish Engulfing',
-                        'Uptrend HH/HL', 'Strong Bullish', 61.2, 28.4, 4.5,
-                        2648.0, 2666.75, 80, 1727000100000
+                    db.execSQL(
+                        """
+                        INSERT INTO closed_candle_signal_logs (
+                            symbolWithSuffix, timeframeLabel, closedBarEpochSec, closePrice,
+                            verdictLabel, patternDetected, structureLabel, trendLabel,
+                            rsi14, adx14, atr14, stopReferencePrice, targetReferencePrice,
+                            confluenceScore, savedTimestampMs
+                        ) VALUES (
+                            'XAUUSD.sml', 'M15', 1727000000, 2655.5,
+                            'KONFLUENSI NAIK KUAT (BULLISH) [CANDLE 1]', 'Bullish Engulfing',
+                            'Uptrend HH/HL', 'Strong Bullish', 61.2, 28.4, 4.5,
+                            2648.0, 2666.75, 80, 1727000100000
+                        )
+                        """.trimIndent()
                     )
-                    """.trimIndent()
-                )
-            }
+                }
 
-            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
-        }
+                override fun onUpgrade(db: SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            })
+            .build()
 
-        val sqliteDb = helper.writableDatabase
+        val helperV1 = factory.create(configV1)
         try {
-            val frameworkDb = FrameworkSQLiteDatabase(sqliteDb)
-            HubDatabase.MIGRATION_1_2.migrate(frameworkDb)
+            val db = helperV1.writableDatabase
+            HubDatabase.MIGRATION_1_2.migrate(db)
 
-            sqliteDb.rawQuery(
-                "SELECT symbolWithSuffix, directionBias, outcomeStatus, outcomePrice, outcomeEvaluatedAtMs, timeframeMinutes FROM closed_candle_signal_logs",
-                null
+            db.query(
+                "SELECT symbolWithSuffix, directionBias, outcomeStatus, outcomePrice, outcomeEvaluatedAtMs, timeframeMinutes FROM closed_candle_signal_logs"
             ).use { cursor ->
                 assertTrue(cursor.moveToFirst())
                 assertEquals("XAUUSD.sml", cursor.getString(0))
@@ -275,8 +280,7 @@ class Priority1And2FeatureTest {
                 assertEquals(15, cursor.getInt(5))
             }
         } finally {
-            sqliteDb.close()
-            helper.close()
+            helperV1.close()
             context.deleteDatabase(dbName)
         }
     }
@@ -405,13 +409,16 @@ class Priority1And2FeatureTest {
             }
         }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("cockpit_mode_toggle").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("simple_decision_card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("hud_terminal_list").performScrollToNode(hasTestTag("cockpit_mode_toggle"))
+        composeRule.onNodeWithTag("cockpit_mode_toggle").assertIsDisplayed()
+        composeRule.onNodeWithTag("hud_terminal_list").performScrollToNode(hasTestTag("simple_decision_card"))
+        composeRule.onNodeWithTag("simple_decision_card").assertIsDisplayed()
         composeRule.onNodeWithTag("simple_risk_chip_2").performScrollTo().performClick()
         assertEquals(2.0, lastRiskChoice, 0.001)
         composeRule.onNodeWithTag("simple_entry_value").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("simple_copy_order_button").performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag("backtest_summary_card").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("hud_terminal_list").performScrollToNode(hasTestTag("backtest_summary_card"))
+        composeRule.onNodeWithTag("backtest_summary_card").assertIsDisplayed()
     }
 
     @Test
@@ -453,6 +460,7 @@ class Priority1And2FeatureTest {
             }
         }
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("hud_terminal_list").performScrollToNode(hasTestTag("simple_decision_card"))
         composeRule.onNodeWithTag("simple_standby_notice").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("simple_copy_order_button").assertDoesNotExist()
     }
