@@ -1,12 +1,15 @@
 package com.example.domain
 
 import com.example.model.AnalyticalVerdict
+import com.example.model.BacktestSummaryReport
 import com.example.model.BrokerContractSpec
 import com.example.model.CompleteHubAnalysis
 import com.example.model.DataEngineReport
 import com.example.model.GlobalMarketSession
 import com.example.model.HtfAlignmentReport
 import com.example.model.HtfAlignmentStatus
+import com.example.model.InstrumentCalibrationProfile
+import com.example.model.InstrumentCalibrationReport
 import com.example.model.LotRiskCalculation
 import com.example.model.MacdState
 import com.example.model.MacroNewsArticle
@@ -21,7 +24,9 @@ import com.example.model.NewsEngineReport
 import com.example.model.NewsImpactLevel
 import com.example.model.OnlineDataProvider
 import com.example.model.PatternBias
+import com.example.model.PlainLanguageBriefing
 import com.example.model.RsiRegime
+import com.example.model.SignalOutcomeStatus
 import com.example.model.SmartMoneyReport
 import com.example.model.SrInteractionType
 import com.example.model.StructureBreakEvent
@@ -39,6 +44,7 @@ import com.example.model.VolumeEngineReport
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 object IndicatorAndConfluenceEngines {
@@ -547,7 +553,16 @@ object IndicatorAndConfluenceEngines {
         val finalBullScore = bullPoints.coerceIn(0, 100)
         val finalBearScore = bearPoints.coerceIn(0, 100)
 
-        val activeTfRawVerdict = when {
+        val calibrationReport = buildInstrumentCalibrationReport(
+            bars = activeBars,
+            symbol = symbol,
+            momentumReport = momentumReport,
+            volatilityReport = volatilityReport,
+            sessionReport = sessionReport,
+            highImpactNewsCount = highImpactNews
+        )
+
+        val rawPreGateVerdict = when {
             finalBullScore >= 65 && finalBullScore > finalBearScore + 15 ->
                 AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE
             finalBearScore >= 65 && finalBearScore > finalBullScore + 15 ->
@@ -557,6 +572,20 @@ object IndicatorAndConfluenceEngines {
             finalBearScore >= 46 && finalBearScore > finalBullScore + 8 ->
                 AnalyticalVerdict.MODERATE_BEARISH_BIAS
             else -> AnalyticalVerdict.NEUTRAL_CONSOLIDATION
+        }
+
+        // Filter Anti-Choppy & Spread: menahan bias moderat ketika pasar benar-benar choppy & ADX di bawah ambang instrumen
+        val activeTfRawVerdict = if (
+            calibrationReport.isChoppyMarketDetected &&
+            momentumReport.adx14 < calibrationReport.profile.adxTrendThreshold &&
+            rawPreGateVerdict in listOf(
+                AnalyticalVerdict.MODERATE_BULLISH_BIAS,
+                AnalyticalVerdict.MODERATE_BEARISH_BIAS
+            )
+        ) {
+            AnalyticalVerdict.NEUTRAL_CONSOLIDATION
+        } else {
+            rawPreGateVerdict
         }
 
         val verdict = when {
@@ -602,6 +631,24 @@ object IndicatorAndConfluenceEngines {
                 (mtfReport.isMtfDataComplete && mtfReport.htfBias != PatternBias.NEUTRAL)
         )
 
+        val backtestSummary = runHistoricalBacktest(
+            bars = activeBars,
+            symbol = symbol,
+            calibrationProfile = calibrationReport.profile
+        )
+
+        val plainBriefing = buildPlainLanguageBriefing(
+            symbol = symbol,
+            timeframe = activeTimeframe,
+            verdict = verdict,
+            trend = trendReport,
+            momentum = momentumReport,
+            mtf = mtfReport,
+            news = newsReport,
+            session = sessionReport,
+            calibration = calibrationReport
+        )
+
         return CompleteHubAnalysis(
             symbol = symbol,
             brokerSuffix = brokerSuffix,
@@ -627,7 +674,10 @@ object IndicatorAndConfluenceEngines {
             confluenceChecklist = checklist,
             activeTimeframeVerdict = activeTfRawVerdict,
             mtfContextSummary = mtfContextSummary,
-            brokerContractSpec = brokerContractSpec
+            brokerContractSpec = brokerContractSpec,
+            calibrationReport = calibrationReport,
+            backtestSummary = backtestSummary,
+            plainBriefing = plainBriefing
         )
     }
 
@@ -1041,5 +1091,406 @@ object IndicatorAndConfluenceEngines {
 
         val idx1 = (chron.size - 2).coerceAtLeast(0)
         return Triple(adxSeries[idx1], plusDiSeries[idx1], minusDiSeries[idx1])
+    }
+
+    /**
+     * Profil kalibrasi khusus instrumen (XAUUSD vs EURUSD) agar batas Stop/ATR,
+     * ambang ADX, dan deteksi choppiness menyesuaikan volatilitas alami aset.
+     */
+    fun getInstrumentCalibrationProfile(
+        symbol: MarketSymbol,
+        session: GlobalMarketSession
+    ): InstrumentCalibrationProfile {
+        return when (symbol) {
+            MarketSymbol.XAUUSD -> {
+                val asiaCaution = if (session == GlobalMarketSession.ASIA_PACIFIC) {
+                    "Sesi Asia pada Emas rawan sweep likuiditas palsu; prioritaskan sinyal saat London/NY aktif."
+                } else {
+                    "Kalibrasi XAUUSD aktif (ekor wick lebih lebar diperhitungkan pada ATR)."
+                }
+                InstrumentCalibrationProfile(
+                    symbol = symbol,
+                    profileName = "Emas Spot (XAUUSD High-Volatility)",
+                    adxTrendThreshold = 23.0,
+                    atrStopMultiplier = 1.65,
+                    choppyWickThreshold = 0.62,
+                    maxSpreadToSlRatioPct = 20.0,
+                    sessionGuidance = asiaCaution
+                )
+            }
+            MarketSymbol.EURUSD -> {
+                val sessionNote = if (session == GlobalMarketSession.ASIA_PACIFIC) {
+                    "EURUSD sesi Asia cenderung sempit (ranging); gunakan konfirmasi breakout London."
+                } else {
+                    "Kalibrasi EURUSD aktif (filter konsolidasi ketat)."
+                }
+                InstrumentCalibrationProfile(
+                    symbol = symbol,
+                    profileName = "Forex Major (EURUSD Tight-Range)",
+                    adxTrendThreshold = 25.0,
+                    atrStopMultiplier = 1.35,
+                    choppyWickThreshold = 0.56,
+                    maxSpreadToSlRatioPct = 18.0,
+                    sessionGuidance = sessionNote
+                )
+            }
+        }
+    }
+
+    fun buildInstrumentCalibrationReport(
+        bars: List<Mt5RateBar>,
+        symbol: MarketSymbol,
+        momentumReport: MomentumEngineReport,
+        volatilityReport: VolatilityEngineReport,
+        sessionReport: TradingSessionReport,
+        highImpactNewsCount: Int
+    ): InstrumentCalibrationReport {
+        val profile = getInstrumentCalibrationProfile(symbol, sessionReport.currentSession)
+        val closedWindow = bars.drop(1).take(8)
+        var flips = 0
+        var prevDir = 0
+        for (bar in closedWindow) {
+            val dir = when {
+                bar.close > bar.open -> 1
+                bar.close < bar.open -> -1
+                else -> 0
+            }
+            if (dir != 0 && prevDir != 0 && dir != prevDir) {
+                flips++
+            }
+            if (dir != 0) prevDir = dir
+        }
+
+        val avgWickRatio = if (closedWindow.isNotEmpty()) {
+            closedWindow.map { b ->
+                val range = (b.high - b.low).coerceAtLeast(symbol.pointSize)
+                ((b.upperWick + b.lowerWick) / range).coerceIn(0.0, 1.0)
+            }.average()
+        } else 0.0
+
+        val isChoppy = (flips >= 5 && momentumReport.adx14 < profile.adxTrendThreshold) ||
+            (avgWickRatio >= profile.choppyWickThreshold && momentumReport.adx14 < profile.adxTrendThreshold)
+
+        val bar1 = bars.getOrNull(1) ?: bars.firstOrNull()
+        val spreadPts = (bar1?.spread ?: symbol.defaultSpreadPoints).coerceAtLeast(0)
+        val spreadPrice = spreadPts * symbol.pointSize
+        val slDist = volatilityReport.analyticalStopDistance.coerceAtLeast(symbol.pointSize)
+        val spreadToSlPct = ((spreadPrice / slDist) * 100.0).coerceIn(0.0, 999.0)
+        val isSpreadSafe = spreadToSlPct <= profile.maxSpreadToSlRatioPct
+        val isNewsBlocked = highImpactNewsCount >= 2
+        val qualityPassed = !isChoppy && isSpreadSafe && !isNewsBlocked
+
+        val summary = when {
+            !isSpreadSafe -> "Spread terlalu lebar (${String.format(Locale.US, "%.1f", spreadToSlPct)}% dari jarak SL). Biaya entry mahal."
+            isChoppy -> "Pasar terdeteksi Sideways/Choppy ($flips pergantian arah, ADX ${String.format(Locale.US, "%.1f", momentumReport.adx14)}). Risiko false signal tinggi."
+            isNewsBlocked -> "Waspada $highImpactNewsCount agenda berita Dampak Tinggi. Tunggu volatilitas stabil."
+            else -> "Quality Gate Lolos (${profile.profileName}): Spread ${String.format(Locale.US, "%.1f", spreadToSlPct)}% dari SL, struktur bersih."
+        }
+
+        return InstrumentCalibrationReport(
+            profile = profile,
+            isChoppyMarketDetected = isChoppy,
+            consecutiveFlipCount = flips,
+            averageWickRatio = avgWickRatio,
+            spreadPoints = spreadPts,
+            spreadToSlRatioPct = spreadToSlPct,
+            isSpreadSafe = isSpreadSafe,
+            isHighImpactNewsBlocked = isNewsBlocked,
+            qualityGatePassed = qualityPassed,
+            qualityGateSummary = summary
+        )
+    }
+
+    /**
+     * Mini-Backtest Historis Non-Repaint berbasis Closed Candle saja (kronologis, nol look-ahead).
+     * Menguji strategi konfluensi tren EMA(20/50) + RSI(14) dengan Target 1.5R dan SL berbasis ATR.
+     * Konservatif: bila SL & TP1 tersentuh di candle yang sama, SL dihitung lebih dulu.
+     */
+    fun runHistoricalBacktest(
+        bars: List<Mt5RateBar>,
+        symbol: MarketSymbol,
+        calibrationProfile: InstrumentCalibrationProfile = getInstrumentCalibrationProfile(symbol, GlobalMarketSession.LONDON)
+    ): BacktestSummaryReport {
+        val closedChron = if (bars.size > 1) bars.drop(1).asReversed() else emptyList()
+        if (closedChron.size < 70) {
+            return BacktestSummaryReport(
+                sampleBarsCount = closedChron.size,
+                totalTrades = 0,
+                wins = 0,
+                losses = 0,
+                breakevenOrOpen = 0,
+                winRatePct = 0.0,
+                profitFactor = 0.0,
+                netExpectancyR = 0.0,
+                maxDrawdownR = 0.0,
+                honestNote = "Data historis kurang dari 70 candle tutup; mini-backtest belum dapat dihitung."
+            )
+        }
+
+        val closes = closedChron.map { it.close }
+        val ema20 = computeEmaSeries(closes, 20)
+        val ema50 = computeEmaSeries(closes, 50)
+        val rsi14 = computeRsiSeries(closes, 14)
+
+        val trList = ArrayList<Double>(closedChron.size)
+        for (i in closedChron.indices) {
+            val cur = closedChron[i]
+            val tr = if (i == 0) {
+                cur.high - cur.low
+            } else {
+                val prevClose = closedChron[i - 1].close
+                maxOf(cur.high - cur.low, abs(cur.high - prevClose), abs(cur.low - prevClose))
+            }
+            trList.add(tr)
+        }
+        val atrSeries = computeWilderRmaSeries(trList, 14)
+
+        var wins = 0
+        var losses = 0
+        var openOrExpired = 0
+        var grossWinR = 0.0
+        var grossLossR = 0.0
+        var equityR = 0.0
+        var peakR = 0.0
+        var maxDdR = 0.0
+
+        var idx = 55
+        while (idx < closedChron.size - 2) {
+            val bar = closedChron[idx]
+            val e20 = ema20[idx]
+            val e50 = ema50[idx]
+            val rsi = rsi14[idx]
+            val atr = atrSeries[idx].coerceAtLeast(symbol.pointSize * 10.0)
+            val stopDist = atr * calibrationProfile.atrStopMultiplier
+            val tpDist = stopDist * 1.5
+
+            val isBuySetup = e20 > e50 && bar.close > e20 && bar.close > bar.open && rsi in 52.0..72.0
+            val isSellSetup = e20 < e50 && bar.close < e20 && bar.close < bar.open && rsi in 28.0..48.0
+
+            if (!isBuySetup && !isSellSetup) {
+                idx++
+                continue
+            }
+
+            val entry = bar.close
+            val sl = if (isBuySetup) entry - stopDist else entry + stopDist
+            val tp = if (isBuySetup) entry + tpDist else entry - tpDist
+
+            var resolved = false
+            var exitIndex = idx + 1
+            val maxLookahead = minOf(closedChron.size - 1, idx + 36)
+            for (fwd in (idx + 1)..maxLookahead) {
+                val fBar = closedChron[fwd]
+                if (isBuySetup) {
+                    if (fBar.low <= sl) {
+                        losses++
+                        grossLossR += 1.0
+                        equityR -= 1.0
+                        exitIndex = fwd
+                        resolved = true
+                        break
+                    } else if (fBar.high >= tp) {
+                        wins++
+                        grossWinR += 1.5
+                        equityR += 1.5
+                        exitIndex = fwd
+                        resolved = true
+                        break
+                    }
+                } else {
+                    if (fBar.high >= sl) {
+                        losses++
+                        grossLossR += 1.0
+                        equityR -= 1.0
+                        exitIndex = fwd
+                        resolved = true
+                        break
+                    } else if (fBar.low <= tp) {
+                        wins++
+                        grossWinR += 1.5
+                        equityR += 1.5
+                        exitIndex = fwd
+                        resolved = true
+                        break
+                    }
+                }
+                exitIndex = fwd
+            }
+
+            if (!resolved) {
+                openOrExpired++
+            } else {
+                if (equityR > peakR) peakR = equityR
+                maxDdR = max(maxDdR, peakR - equityR)
+            }
+
+            idx = exitIndex + 1
+        }
+
+        val resolvedTrades = wins + losses
+        val totalTrades = resolvedTrades + openOrExpired
+        val winRate = if (resolvedTrades > 0) (wins.toDouble() / resolvedTrades) * 100.0 else 0.0
+        val pf = when {
+            grossLossR > 0.0 -> grossWinR / grossLossR
+            grossWinR > 0.0 -> 9.99
+            else -> 0.0
+        }
+        val expectancy = if (resolvedTrades > 0) (grossWinR - grossLossR) / resolvedTrades else 0.0
+
+        val note = when {
+            resolvedTrades == 0 -> "Belum ada setup selesai pada ${closedChron.size} candle tutup terakhir."
+            resolvedTrades < 5 -> "Sampel masih kecil ($resolvedTrades trade selesai dari ${closedChron.size} bar). Jadikan referensi awal saja."
+            else -> "Simulasi objektif non-repaint pada ${closedChron.size} candle tutup (Target 1.5R, tie-break SL konservatif)."
+        }
+
+        return BacktestSummaryReport(
+            sampleBarsCount = closedChron.size,
+            totalTrades = totalTrades,
+            wins = wins,
+            losses = losses,
+            breakevenOrOpen = openOrExpired,
+            winRatePct = winRate,
+            profitFactor = pf,
+            netExpectancyR = expectancy,
+            maxDrawdownR = maxDdR,
+            honestNote = note
+        )
+    }
+
+    /**
+     * Mengevaluasi outcome riwayat sinyal (WIN_TP / LOSS_SL) terhadap candle tutup terbaru.
+     * Konservatif: bila SL & TP tersentuh dalam candle yang sama, SL dihitung lebih dahulu.
+     */
+    fun evaluatePendingSignalOutcome(
+        directionBias: String,
+        verdictLabel: String,
+        closedBarEpochSec: Long,
+        stopReferencePrice: Double,
+        targetReferencePrice: Double,
+        bars: List<Mt5RateBar>,
+        evaluatedAtMs: Long = System.currentTimeMillis()
+    ): Triple<SignalOutcomeStatus, Double, Long>? {
+        val inferredBias = when {
+            directionBias.equals("BUY", ignoreCase = true) -> "BUY"
+            directionBias.equals("SELL", ignoreCase = true) -> "SELL"
+            verdictLabel.contains("BULLISH", ignoreCase = true) || verdictLabel.contains("NAIK BIAS", ignoreCase = true) -> "BUY"
+            verdictLabel.contains("BEARISH", ignoreCase = true) || verdictLabel.contains("TURUN BIAS", ignoreCase = true) -> "SELL"
+            else -> "NEUTRAL"
+        }
+        if (inferredBias == "NEUTRAL") {
+            return Triple(SignalOutcomeStatus.EXPIRED_NEUTRAL, 0.0, evaluatedAtMs)
+        }
+        if (stopReferencePrice <= 0.0 || targetReferencePrice <= 0.0) return null
+
+        val futureClosedChron = bars
+            .filter { it.barIndex >= 1 && it.timeEpochSec > closedBarEpochSec }
+            .sortedBy { it.timeEpochSec }
+
+        for (bar in futureClosedChron) {
+            if (inferredBias == "BUY") {
+                if (bar.low <= stopReferencePrice) {
+                    return Triple(SignalOutcomeStatus.LOSS_SL, stopReferencePrice, evaluatedAtMs)
+                }
+                if (bar.high >= targetReferencePrice) {
+                    return Triple(SignalOutcomeStatus.WIN_TP, targetReferencePrice, evaluatedAtMs)
+                }
+            } else {
+                if (bar.high >= stopReferencePrice) {
+                    return Triple(SignalOutcomeStatus.LOSS_SL, stopReferencePrice, evaluatedAtMs)
+                }
+                if (bar.low <= targetReferencePrice) {
+                    return Triple(SignalOutcomeStatus.WIN_TP, targetReferencePrice, evaluatedAtMs)
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Menghasilkan ringkasan bahasa awam yang mudah dipahami pengguna non-teknis.
+     */
+    fun buildPlainLanguageBriefing(
+        symbol: MarketSymbol,
+        timeframe: Timeframe,
+        verdict: AnalyticalVerdict,
+        trend: TrendEngineReport,
+        momentum: MomentumEngineReport,
+        mtf: MtfEngineReport,
+        news: NewsEngineReport,
+        session: TradingSessionReport,
+        calibration: InstrumentCalibrationReport
+    ): PlainLanguageBriefing {
+        val headline = when (verdict) {
+            AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+            AnalyticalVerdict.MODERATE_BULLISH_BIAS -> "PELUANG BELI (BUY)"
+            AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+            AnalyticalVerdict.MODERATE_BEARISH_BIAS -> "PELUANG JUAL (SELL)"
+            AnalyticalVerdict.HTF_BULLISH_LTF_PULLBACK -> "TUNGGU KOREKSI SELESAI (ARAH UTAMA NAIK)"
+            AnalyticalVerdict.HTF_BEARISH_LTF_PULLBACK -> "TUNGGU KOREKSI SELESAI (ARAH UTAMA TURUN)"
+            AnalyticalVerdict.NEUTRAL_CONSOLIDATION -> "TUNGGU DULU (PASAR BELUM JELAS)"
+        }
+
+        val trendPlain = when (trend.classification) {
+            TrendClassification.STRONG_BULLISH, TrendClassification.BULLISH -> "harga sedang dalam tren naik"
+            TrendClassification.STRONG_BEARISH, TrendClassification.BEARISH -> "harga sedang dalam tren turun"
+            TrendClassification.NEUTRAL -> "harga masih bergerak mendatar (sideways)"
+        }
+        val mtfPlain = if (!mtf.isMtfDataComplete) {
+            "data beberapa timeframe masih melengkapi sinkronisasi"
+        } else {
+            when (mtf.htfBias) {
+                PatternBias.BULLISH -> "arah grafik besar (H1/M30) mendukung kenaikan"
+                PatternBias.BEARISH -> "arah grafik besar (H1/M30) mendukung penurunan"
+                PatternBias.NEUTRAL -> "grafik besar masih netral"
+            }
+        }
+        val momentumPlain = if (momentum.isTrendStrengthConfirmed) {
+            "dorongan harga cukup kuat"
+        } else {
+            "tenaga pergerakan masih lemah"
+        }
+
+        val beginnerSummary = "${symbol.code} (${timeframe.label}) saat ini menunjukkan bahwa $trendPlain, $mtfPlain, dan $momentumPlain. " +
+            if (verdict in listOf(
+                    AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                    AnalyticalVerdict.MODERATE_BULLISH_BIAS,
+                    AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                    AnalyticalVerdict.MODERATE_BEARISH_BIAS
+                )
+            ) {
+                "Candle penutupan terakhir sudah memberi konfirmasi arah yang lebih terukur."
+            } else {
+                "Sebaiknya tahan transaksi terlebih dahulu agar tidak terjebak pergerakan bolak-balik."
+            }
+
+        val actionHint = when {
+            calibration.isHighImpactNewsBlocked ->
+                "Ada ${news.highImpactCount} berita berdampak besar. Kurangi risiko atau tunggu 15–30 menit setelah rilis."
+            !calibration.isSpreadSafe ->
+                "Spread sedang lebar (${calibration.spreadPoints} pt). Pertimbangkan tunggu sesi lebih likuid sebelum masuk."
+            verdict in listOf(
+                AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BULLISH_BIAS,
+                AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+                AnalyticalVerdict.MODERATE_BEARISH_BIAS
+            ) ->
+                "Pasang Entry, Stop Loss, dan Target Profit sekaligus sesuai pilihan risiko Anda. ${session.currentSession.sessionName} aktif."
+            else ->
+                "Tunggu sampai candle tutup berikutnya memberi arah BUY/SELL yang bersih. ${calibration.profile.sessionGuidance}"
+        }
+
+        val caution = when {
+            calibration.isHighImpactNewsBlocked -> "Berita Besar Aktif (${news.highImpactCount})"
+            calibration.isChoppyMarketDetected -> "Pasar Rawan Sideways / Choppy"
+            !calibration.isSpreadSafe -> "Spread Broker Sedang Lebar"
+            else -> null
+        }
+
+        return PlainLanguageBriefing(
+            headline = headline,
+            beginnerSummary = beginnerSummary,
+            actionHint = actionHint,
+            cautionBadge = caution
+        )
     }
 }

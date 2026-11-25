@@ -487,13 +487,18 @@ fun HubSmartPatternApp() {
                             onUpdateMetaApiAuthToken = viewModel::updateMetaApiAuthTokenInput,
                             onSaveMetaApiCredentials = viewModel::saveAndConnectMetaApiCredentials,
                             onClearMetaApiCredentials = viewModel::clearSavedMetaApiCredentials,
-                            onNavigateToTrade = { viewModel.selectTab(HubTab.TRADE) }
+                            onNavigateToTrade = { viewModel.selectTab(HubTab.TRADE) },
+                            onToggleSimpleMode = viewModel::toggleSimpleCockpitMode,
+                            onUpdateRiskPreferences = viewModel::updateRiskPreferences
                         )
 
                         HubTab.TRADE -> TradeSignalScreen(
                             analysis = analysis,
                             selectedProvider = uiState.selectedProvider,
-                            onNavigateToChart = { viewModel.selectTab(HubTab.HUD_CHART) }
+                            onNavigateToChart = { viewModel.selectTab(HubTab.HUD_CHART) },
+                            accountBalanceDollars = uiState.accountBalanceDollars,
+                            riskPercentage = uiState.riskPercentage,
+                            onRiskPreferencesChanged = viewModel::updateRiskPreferences
                         )
 
                         HubTab.ENGINES -> TenEnginesScreen(

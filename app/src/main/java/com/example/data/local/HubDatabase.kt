@@ -10,6 +10,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "closed_candle_signal_logs")
@@ -29,7 +31,12 @@ data class SavedSignalSnapshotEntity(
     val stopReferencePrice: Double,
     val targetReferencePrice: Double,
     val confluenceScore: Int,
-    val savedTimestampMs: Long = System.currentTimeMillis()
+    val savedTimestampMs: Long = System.currentTimeMillis(),
+    val directionBias: String = "NEUTRAL",
+    val outcomeStatus: String = "PENDING",
+    val outcomePrice: Double = 0.0,
+    val outcomeEvaluatedAtMs: Long = 0L,
+    val timeframeMinutes: Int = 15
 )
 
 @Entity(tableName = "custom_macro_events")
@@ -52,6 +59,9 @@ interface HubDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSignalLog(entity: SavedSignalSnapshotEntity)
 
+    @Query("UPDATE closed_candle_signal_logs SET outcomeStatus = :status, outcomePrice = :outcomePrice, outcomeEvaluatedAtMs = :evaluatedAtMs WHERE id = :id")
+    suspend fun updateSignalOutcome(id: Int, status: String, outcomePrice: Double, evaluatedAtMs: Long)
+
     @Query("DELETE FROM closed_candle_signal_logs WHERE id = :id")
     suspend fun deleteSignalLogById(id: Int)
 
@@ -70,7 +80,7 @@ interface HubDao {
 
 @Database(
     entities = [SavedSignalSnapshotEntity::class, CustomNewsEventEntity::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class HubDatabase : RoomDatabase() {
@@ -80,13 +90,23 @@ abstract class HubDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: HubDatabase? = null
 
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE closed_candle_signal_logs ADD COLUMN directionBias TEXT NOT NULL DEFAULT 'NEUTRAL'")
+                db.execSQL("ALTER TABLE closed_candle_signal_logs ADD COLUMN outcomeStatus TEXT NOT NULL DEFAULT 'PENDING'")
+                db.execSQL("ALTER TABLE closed_candle_signal_logs ADD COLUMN outcomePrice REAL NOT NULL DEFAULT 0.0")
+                db.execSQL("ALTER TABLE closed_candle_signal_logs ADD COLUMN outcomeEvaluatedAtMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE closed_candle_signal_logs ADD COLUMN timeframeMinutes INTEGER NOT NULL DEFAULT 15")
+            }
+        }
+
         fun getInstance(context: Context): HubDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     HubDatabase::class.java,
                     "hub_smart_pattern_engine.db"
-                ).fallbackToDestructiveMigration(dropAllTables = true).build()
+                ).addMigrations(MIGRATION_1_2).build()
                 INSTANCE = instance
                 instance
             }

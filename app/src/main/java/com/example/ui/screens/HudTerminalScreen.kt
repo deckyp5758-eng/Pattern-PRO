@@ -80,7 +80,11 @@ import com.example.model.OnlineDataProvider
 import com.example.model.SrInteractionType
 import com.example.model.Timeframe
 import com.example.ui.HubUiState
+import com.example.ui.components.BacktestAndCalibrationCard
+import com.example.ui.components.CockpitModeToggleBar
 import com.example.ui.components.InteractiveMt5ChartCanvas
+import com.example.ui.components.SignalOutcomeBadgePill
+import com.example.ui.components.SimpleCockpitDecisionCard
 import com.example.ui.components.VolatilityProbabilityZoneVisualizer
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
@@ -127,6 +131,8 @@ fun HudTerminalScreen(
     onSaveMetaApiCredentials: () -> Unit = {},
     onClearMetaApiCredentials: () -> Unit = {},
     onNavigateToTrade: () -> Unit = {},
+    onToggleSimpleMode: (Boolean) -> Unit = {},
+    onUpdateRiskPreferences: (Double, Double) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -408,6 +414,28 @@ fun HudTerminalScreen(
             }
         }
 
+        // 2B. Pemilih Mode Sederhana (Beginner-Friendly) vs Mode Pro (14 Mesin)
+        item {
+            CockpitModeToggleBar(
+                isSimpleMode = uiState.isSimpleCockpitMode,
+                onToggleSimpleMode = onToggleSimpleMode
+            )
+        }
+
+        if (uiState.isSimpleCockpitMode) {
+            item {
+                SimpleCockpitDecisionCard(
+                    uiState = uiState,
+                    analysis = analysis,
+                    onUpdateRiskPreferences = onUpdateRiskPreferences,
+                    onNavigateToTrade = onNavigateToTrade,
+                    onSaveSnapshot = onSaveSnapshot,
+                    onSwitchToProMode = { onToggleSimpleMode(false) }
+                )
+            }
+        }
+
+        if (!uiState.isSimpleCockpitMode) {
         // 3. Pemisahan Candle [1] (Sudah Tutup / Sinyal Final di Kiri) vs Candle [0] (Sedang Berjalan di Ujung Kanan Grafik MT5)
         item {
             Row(
@@ -660,6 +688,7 @@ fun HudTerminalScreen(
                 }
             }
         }
+        } // end Pro-only Sections 3 & 4
 
         // 5. Grafik Interaktif MT5 & Tombol Lapisan Indikator
         item {
@@ -805,6 +834,7 @@ fun HudTerminalScreen(
             }
         }
 
+        if (!uiState.isSimpleCockpitMode) {
         // 5B. PENJELASAN ALUR SKENARIO GRAFIK & LEVEL HARGA (BISA DISALIN)
         item {
             val sr = analysis.srEngine
@@ -1284,6 +1314,16 @@ fun HudTerminalScreen(
                 }
             }
         }
+        } // end Pro-only Sections 5B-7
+
+        // 7B. Mini-Backtest Historis (Non-Repaint) & Kalibrasi Instrumen
+        item {
+            BacktestAndCalibrationCard(
+                analysis = analysis,
+                savedLogs = savedLogs,
+                compact = false
+            )
+        }
 
         // 8. Riwayat Sinyal Candle Tutup yang Tersimpan
         if (savedLogs.isNotEmpty()) {
@@ -1327,13 +1367,24 @@ fun HudTerminalScreen(
                     ) {
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            Text(
-                                text = "${logItem.symbolWithSuffix} [${logItem.timeframeLabel}] • ${logItem.verdictLabel}",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = CyanSecondary
-                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${logItem.symbolWithSuffix} [${logItem.timeframeLabel}] • ${logItem.verdictLabel}",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = CyanSecondary,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                SignalOutcomeBadgePill(logItem = logItem)
+                            }
                             Text(
                                 text = "Tutup @ ${logItem.closePrice} | Pola: ${logItem.patternDetected} | Skor: ${logItem.confluenceScore}%",
                                 style = MaterialTheme.typography.bodyMedium,

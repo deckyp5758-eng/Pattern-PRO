@@ -52,6 +52,9 @@ class UserPreferencesManager(context: Context) {
         private const val KEY_BROKER_SUFFIX = "pref_broker_suffix"
         private const val KEY_TRADE_NOTIFICATIONS_ENABLED = "pref_trade_notifications_enabled"
         private const val KEY_OTA_ALLOW_DOWNGRADE = "pref_ota_allow_downgrade"
+        private const val KEY_SIMPLE_COCKPIT_MODE = "pref_simple_cockpit_mode"
+        private const val KEY_ACCOUNT_BALANCE_DOLLARS = "pref_account_balance_dollars"
+        private const val KEY_RISK_PERCENTAGE = "pref_risk_percentage"
 
         @Volatile
         private var INSTANCE: UserPreferencesManager? = null
@@ -266,5 +269,33 @@ class UserPreferencesManager(context: Context) {
 
     fun isAllowOtaDowngrade(): Boolean {
         return prefs.getBoolean(KEY_OTA_ALLOW_DOWNGRADE, false)
+    }
+
+    fun saveSimpleCockpitMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SIMPLE_COCKPIT_MODE, enabled).apply()
+    }
+
+    fun isSimpleCockpitMode(): Boolean {
+        return prefs.getBoolean(KEY_SIMPLE_COCKPIT_MODE, true)
+    }
+
+    fun savePreferredAccountBalance(balance: Double) {
+        if (balance.isFinite() && balance >= 10.0) {
+            prefs.edit().putString(KEY_ACCOUNT_BALANCE_DOLLARS, balance.toString()).apply()
+        }
+    }
+
+    fun getPreferredAccountBalance(): Double {
+        return prefs.getString(KEY_ACCOUNT_BALANCE_DOLLARS, null)?.toDoubleOrNull()?.takeIf { it >= 10.0 } ?: 1000.0
+    }
+
+    fun savePreferredRiskPercent(riskPct: Double) {
+        if (riskPct.isFinite() && riskPct in 0.1..10.0) {
+            prefs.edit().putString(KEY_RISK_PERCENTAGE, riskPct.toString()).apply()
+        }
+    }
+
+    fun getPreferredRiskPercent(): Double {
+        return prefs.getString(KEY_RISK_PERCENTAGE, null)?.toDoubleOrNull()?.takeIf { it in 0.1..10.0 } ?: 1.0
     }
 }

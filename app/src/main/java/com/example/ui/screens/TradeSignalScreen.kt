@@ -43,6 +43,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.example.model.AnalyticalVerdict
 import com.example.model.CompleteHubAnalysis
 import com.example.model.OnlineDataProvider
+import com.example.ui.components.BacktestAndCalibrationCard
 import com.example.ui.theme.BearishBg
 import com.example.ui.theme.BearishCrimson
 import com.example.ui.theme.BullishBg
@@ -84,6 +86,9 @@ fun TradeSignalScreen(
     analysis: CompleteHubAnalysis,
     selectedProvider: OnlineDataProvider,
     onNavigateToChart: () -> Unit = {},
+    accountBalanceDollars: Double = 1000.0,
+    riskPercentage: Double = 1.0,
+    onRiskPreferencesChanged: (Double, Double) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     val symbol = analysis.symbol
@@ -92,11 +97,28 @@ fun TradeSignalScreen(
     val bar1 = analysis.dataEngine.closedCandle1
     val entryPrice = bar1.close
 
-    // State Kalkulator Risiko
-    var balanceInput by remember { mutableStateOf("1000") }
-    var selectedRiskPct by remember { mutableStateOf(1.0) } // 1%
+    // State Kalkulator Risiko (terhubung dua arah ke preferensi ViewModel/DataStore)
+    var balanceInput by remember {
+        mutableStateOf(
+            if (accountBalanceDollars % 1.0 == 0.0) accountBalanceDollars.toInt().toString()
+            else String.format(Locale.US, "%.2f", accountBalanceDollars)
+        )
+    }
+    var selectedRiskPct by remember { mutableStateOf(riskPercentage) }
 
-    val balanceNum = balanceInput.toDoubleOrNull() ?: 1000.0
+    LaunchedEffect(accountBalanceDollars, riskPercentage) {
+        val currentVal = balanceInput.toDoubleOrNull()
+        if (currentVal == null || abs(currentVal - accountBalanceDollars) > 0.01) {
+            balanceInput = if (accountBalanceDollars % 1.0 == 0.0) {
+                accountBalanceDollars.toInt().toString()
+            } else {
+                String.format(Locale.US, "%.2f", accountBalanceDollars)
+            }
+        }
+        selectedRiskPct = riskPercentage
+    }
+
+    val balanceNum = balanceInput.toDoubleOrNull() ?: accountBalanceDollars
     val riskAmountDollars = balanceNum * (selectedRiskPct / 100.0)
 
     val isBuy = analysis.verdict in listOf(
@@ -584,7 +606,10 @@ fun TradeSignalScreen(
                             val isSel = balanceInput == presetBal
                             FilterChip(
                                 selected = isSel,
-                                onClick = { balanceInput = presetBal },
+                                onClick = {
+                                    balanceInput = presetBal
+                                    onRiskPreferencesChanged(presetBal.toDouble(), selectedRiskPct)
+                                },
                                 label = { Text("$$presetBal", style = MaterialTheme.typography.labelSmall) },
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = GoldPrimary.copy(alpha = 0.25f),
@@ -601,7 +626,14 @@ fun TradeSignalScreen(
                     ) {
                         OutlinedTextField(
                             value = balanceInput,
-                            onValueChange = { balanceInput = it },
+                            onValueChange = { newText ->
+                                balanceInput = newText
+                                newText.toDoubleOrNull()?.let { parsed ->
+                                    if (parsed >= 10.0) {
+                                        onRiskPreferencesChanged(parsed, selectedRiskPct)
+                                    }
+                                }
+                            },
                             label = { Text("Modal Akun ($)") },
                             singleLine = true,
                             modifier = Modifier
@@ -615,7 +647,10 @@ fun TradeSignalScreen(
                                 listOf(0.5, 1.0, 2.0, 3.0).forEach { rPct ->
                                     FilterChip(
                                         selected = selectedRiskPct == rPct,
-                                        onClick = { selectedRiskPct = rPct },
+                                        onClick = {
+                                            selectedRiskPct = rPct
+                                            onRiskPreferencesChanged(balanceNum, rPct)
+                                        },
                                         label = { Text("${if (rPct == 0.5) "0.5" else rPct.toInt().toString()}%", style = MaterialTheme.typography.labelSmall) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = GoldPrimary,
@@ -919,6 +954,14 @@ fun TradeSignalScreen(
                     }
                 }
             }
+        }
+
+        // 5. KALIBRASI INSTRUMEN & MINI-BACKTEST RINGKAS
+        item {
+            BacktestAndCalibrationCard(
+                analysis = analysis,
+                compact = true
+            )
         }
 
         item { Spacer(modifier = Modifier.height(16.dp)) }

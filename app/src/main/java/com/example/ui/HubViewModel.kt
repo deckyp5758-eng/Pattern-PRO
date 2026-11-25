@@ -12,14 +12,17 @@ import com.example.domain.Mql5ConfigParams
 import com.example.domain.Mql5IndicatorCodeGenerator
 import com.example.domain.SystemDiagnosticGuard
 import com.example.domain.SystemDiagnosticReport
+import com.example.model.AnalyticalVerdict
 import com.example.model.CompleteHubAnalysis
 import com.example.model.GitHubReleaseInfo
 import com.example.model.LiveVerificationAudit
 import com.example.model.MacroNewsArticle
 import com.example.model.MacroSentiment
 import com.example.model.MarketSymbol
+import com.example.model.Mt5RateBar
 import com.example.model.NewsImpactLevel
 import com.example.model.OnlineDataProvider
+import com.example.model.SignalOutcomeStatus
 import com.example.model.Timeframe
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -78,7 +81,10 @@ data class HubUiState(
     val savedMetaApiTokenHint: String = "",
     val hasCustomSavedCredentials: Boolean = false,
     val allowOtaDowngrade: Boolean = false,
-    val statusBannerMessage: String? = null
+    val statusBannerMessage: String? = null,
+    val isSimpleCockpitMode: Boolean = true,
+    val accountBalanceDollars: Double = 1000.0,
+    val riskPercentage: Double = 1.0
 )
 
 class HubViewModel(
@@ -103,7 +109,10 @@ class HubViewModel(
             savedMetaApiAccountIdHint = repository.getMaskedMetaApiAccountIdHint(),
             savedMetaApiTokenHint = repository.getMaskedMetaApiTokenHint(),
             hasCustomSavedCredentials = repository.hasCustomMetaApiCredentials(),
-            allowOtaDowngrade = repository.isAllowOtaDowngrade()
+            allowOtaDowngrade = repository.isAllowOtaDowngrade(),
+            isSimpleCockpitMode = repository.isSimpleCockpitMode(),
+            accountBalanceDollars = repository.getPreferredAccountBalance(),
+            riskPercentage = repository.getPreferredRiskPercent()
         )
     )
     val uiState: StateFlow<HubUiState> = _uiState.asStateFlow()
@@ -292,6 +301,34 @@ class HubViewModel(
             )
         }
         appendDiagnosticLog("Notifikasi Sinyal Trade HP: ${if (enabled) "AKTIF" else "NONAKTIF"}")
+    }
+
+    fun toggleSimpleCockpitMode(enabled: Boolean) {
+        repository.saveSimpleCockpitMode(enabled)
+        _uiState.update {
+            it.copy(
+                isSimpleCockpitMode = enabled,
+                statusBannerMessage = if (enabled) {
+                    "Mode Sederhana aktif: fokus keputusan BUY/SELL/TUNGGU & lot siap pakai."
+                } else {
+                    "Mode Pro Terminal aktif: menampilkan metrik lengkap 14 mesin & kalibrasi."
+                }
+            )
+        }
+        appendDiagnosticLog("Tampilan Cockpit: ${if (enabled) "MODE SEDERHANA" else "MODE PRO"}")
+    }
+
+    fun updateRiskPreferences(balanceDollars: Double, riskPct: Double) {
+        val safeBalance = if (balanceDollars.isFinite()) balanceDollars.coerceAtLeast(10.0) else 1000.0
+        val safeRisk = if (riskPct.isFinite()) riskPct.coerceIn(0.25, 10.0) else 1.0
+        repository.savePreferredAccountBalance(safeBalance)
+        repository.savePreferredRiskPercent(safeRisk)
+        _uiState.update {
+            it.copy(
+                accountBalanceDollars = safeBalance,
+                riskPercentage = safeRisk
+            )
+        }
     }
 
     /**
@@ -743,7 +780,15 @@ class HubViewModel(
         val bar1 = currentAnalysis.dataEngine.closedCandle1
         val topPattern = currentAnalysis.candleEngine.activeClosedPatterns.firstOrNull()?.pattern?.displayName
             ?: currentAnalysis.candleEngine.anatomyType.label
-        val isBullishBias = currentAnalysis.bullishConfluenceScore >= currentAnalysis.bearishConfluenceScore
+        val isActionableBuy = currentAnalysis.verdict in listOf(
+            AnalyticalVerdict.STRONG_BULLISH_CONFLUENCE,
+            AnalyticalVerdict.MODERATE_BULLISH_BIAS
+        )
+        val isActionableSell = currentAnalysis.verdict in listOf(
+            AnalyticalVerdict.STRONG_BEARISH_CONFLUENCE,
+            AnalyticalVerdict.MODERATE_BEARISH_BIAS
+        )
+        val isBullishBias = isActionableBuy || (!isActionableSell && currentAnalysis.bullishConfluenceScore >= currentAnalysis.bearishConfluenceScore)
         val stopRef = if (isBullishBias) {
             currentAnalysis.volatilityEngine.longStopReferencePrice
         } else {
@@ -753,6 +798,16 @@ class HubViewModel(
             currentAnalysis.volatilityEngine.longTarget1RPrice
         } else {
             currentAnalysis.volatilityEngine.shortTarget1RPrice
+        }
+        val directionBias = when {
+            isActionableBuy -> "BUY"
+            isActionableSell -> "SELL"
+            else -> "NEUTRAL"
+        }
+        val initialOutcome = if (directionBias == "NEUTRAL") {
+            SignalOutcomeStatus.EXPIRED_NEUTRAL.code
+        } else {
+            SignalOutcomeStatus.PENDING.code
         }
         val dominantScore = maxOf(currentAnalysis.bullishConfluenceScore, currentAnalysis.bearishConfluenceScore)
 
@@ -772,12 +827,15 @@ class HubViewModel(
                     atr14 = currentAnalysis.volatilityEngine.atr14,
                     stopReferencePrice = stopRef,
                     targetReferencePrice = targetRef,
-                    confluenceScore = dominantScore
+                    confluenceScore = dominantScore,
+                    directionBias = directionBias,
+                    outcomeStatus = initialOutcome,
+                    timeframeMinutes = currentAnalysis.activeTimeframe.minutes
                 )
             )
-            appendDiagnosticLog("Sinyal Candle [1] (${currentAnalysis.dataEngine.symbolWithSuffix}) disimpan ke riwayat.")
+            appendDiagnosticLog("Sinyal Candle [1] (${currentAnalysis.dataEngine.symbolWithSuffix}) disimpan ke riwayat ($directionBias).")
             _uiState.update {
-                it.copy(statusBannerMessage = "Sinyal Candle Tutup [1] berhasil dikunci ke Catatan Riwayat Non-Repaint.")
+                it.copy(statusBannerMessage = "Sinyal Candle Tutup [1] berhasil dikunci ke Catatan Riwayat & dipantau otomatis.")
             }
         }
     }
@@ -1015,6 +1073,42 @@ class HubViewModel(
                     integrityNotes = integrityNotes
                 )
             )
+        }
+        evaluateSavedSignalOutcomes(sym, bundle.ratesByTimeframe)
+    }
+
+    fun evaluateSavedSignalOutcomes(
+        symbol: MarketSymbol,
+        ratesByTf: Map<Timeframe, List<Mt5RateBar>>
+    ) {
+        val pendingLogs = savedSignalLogs.value.filter { log ->
+            log.outcomeStatus == SignalOutcomeStatus.PENDING.code &&
+                log.symbolWithSuffix.startsWith(symbol.code, ignoreCase = true)
+        }
+        if (pendingLogs.isEmpty()) return
+
+        viewModelScope.launch {
+            for (log in pendingLogs) {
+                val tf = Timeframe.entries.firstOrNull {
+                    it.label == log.timeframeLabel || it.minutes == log.timeframeMinutes
+                } ?: continue
+                val tfBars = ratesByTf[tf] ?: continue
+                val result = IndicatorAndConfluenceEngines.evaluatePendingSignalOutcome(
+                    directionBias = log.directionBias,
+                    verdictLabel = log.verdictLabel,
+                    closedBarEpochSec = log.closedBarEpochSec,
+                    stopReferencePrice = log.stopReferencePrice,
+                    targetReferencePrice = log.targetReferencePrice,
+                    bars = tfBars
+                ) ?: continue
+                repository.updateSignalOutcome(
+                    id = log.id,
+                    status = result.first,
+                    outcomePrice = result.second,
+                    evaluatedAtMs = result.third
+                )
+                appendDiagnosticLog("Outcome Sinyal #${log.id} (${log.symbolWithSuffix} ${log.timeframeLabel}) diperbarui: ${result.first.code}")
+            }
         }
     }
 

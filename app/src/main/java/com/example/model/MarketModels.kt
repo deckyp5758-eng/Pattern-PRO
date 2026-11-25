@@ -642,6 +642,62 @@ data class LotRiskCalculation(
     val assumptionNote: String
 )
 
+enum class SignalOutcomeStatus(val code: String, val label: String) {
+    PENDING("PENDING", "Menunggu Hasil"),
+    WIN_TP("WIN_TP", "TP Tercapai (Win)"),
+    LOSS_SL("LOSS_SL", "SL Tersentuh (Loss)"),
+    EXPIRED_NEUTRAL("EXPIRED_NEUTRAL", "Netral / Kedaluwarsa");
+
+    companion object {
+        fun fromCode(code: String?): SignalOutcomeStatus {
+            return entries.firstOrNull { it.code == code } ?: PENDING
+        }
+    }
+}
+
+data class InstrumentCalibrationProfile(
+    val symbol: MarketSymbol,
+    val profileName: String,
+    val adxTrendThreshold: Double,
+    val atrStopMultiplier: Double,
+    val choppyWickThreshold: Double,
+    val maxSpreadToSlRatioPct: Double,
+    val sessionGuidance: String
+)
+
+data class InstrumentCalibrationReport(
+    val profile: InstrumentCalibrationProfile,
+    val isChoppyMarketDetected: Boolean,
+    val consecutiveFlipCount: Int,
+    val averageWickRatio: Double,
+    val spreadPoints: Int,
+    val spreadToSlRatioPct: Double,
+    val isSpreadSafe: Boolean,
+    val isHighImpactNewsBlocked: Boolean,
+    val qualityGatePassed: Boolean,
+    val qualityGateSummary: String
+)
+
+data class BacktestSummaryReport(
+    val sampleBarsCount: Int,
+    val totalTrades: Int,
+    val wins: Int,
+    val losses: Int,
+    val breakevenOrOpen: Int,
+    val winRatePct: Double,
+    val profitFactor: Double,
+    val netExpectancyR: Double,
+    val maxDrawdownR: Double,
+    val honestNote: String
+)
+
+data class PlainLanguageBriefing(
+    val headline: String,
+    val beginnerSummary: String,
+    val actionHint: String,
+    val cautionBadge: String? = null
+)
+
 data class CompleteHubAnalysis(
     val symbol: MarketSymbol,
     val brokerSuffix: String,
@@ -667,7 +723,10 @@ data class CompleteHubAnalysis(
     val confluenceChecklist: List<Pair<String, Boolean>>,
     val activeTimeframeVerdict: AnalyticalVerdict = verdict,
     val mtfContextSummary: String = mtfEngine.executiveConclusion,
-    val brokerContractSpec: BrokerContractSpec? = null
+    val brokerContractSpec: BrokerContractSpec? = null,
+    val calibrationReport: InstrumentCalibrationReport? = null,
+    val backtestSummary: BacktestSummaryReport? = null,
+    val plainBriefing: PlainLanguageBriefing? = null
 )
 
 data class GitHubReleaseInfo(

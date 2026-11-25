@@ -14,6 +14,7 @@ import com.example.model.Mt5RateBar
 import com.example.model.NewsDataStatus
 import com.example.model.NewsImpactLevel
 import com.example.model.OnlineDataProvider
+import com.example.model.SignalOutcomeStatus
 import com.example.model.Timeframe
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -92,6 +93,30 @@ class HubRepository(
 
     fun saveAllowOtaDowngrade(enabled: Boolean) {
         preferencesManager?.saveAllowOtaDowngrade(enabled)
+    }
+
+    fun isSimpleCockpitMode(): Boolean {
+        return preferencesManager?.isSimpleCockpitMode() ?: true
+    }
+
+    fun saveSimpleCockpitMode(enabled: Boolean) {
+        preferencesManager?.saveSimpleCockpitMode(enabled)
+    }
+
+    fun getPreferredAccountBalance(): Double {
+        return preferencesManager?.getPreferredAccountBalance() ?: 1000.0
+    }
+
+    fun savePreferredAccountBalance(balance: Double) {
+        preferencesManager?.savePreferredAccountBalance(balance)
+    }
+
+    fun getPreferredRiskPercent(): Double {
+        return preferencesManager?.getPreferredRiskPercent() ?: 1.0
+    }
+
+    fun savePreferredRiskPercent(riskPct: Double) {
+        preferencesManager?.savePreferredRiskPercent(riskPct)
     }
 
     fun getMaskedMetaApiAccountIdHint(): String = preferencesManager?.getMaskedAccountIdHint().orEmpty()
@@ -326,6 +351,20 @@ class HubRepository(
 
     suspend fun saveClosedCandleSnapshot(entity: SavedSignalSnapshotEntity) {
         hubDao.insertSignalLog(entity)
+    }
+
+    suspend fun updateSignalOutcome(
+        id: Int,
+        status: SignalOutcomeStatus,
+        outcomePrice: Double,
+        evaluatedAtMs: Long = System.currentTimeMillis()
+    ) {
+        hubDao.updateSignalOutcome(
+            id = id,
+            status = status.code,
+            outcomePrice = outcomePrice,
+            evaluatedAtMs = evaluatedAtMs
+        )
     }
 
     suspend fun deleteSignalLog(id: Int) {
